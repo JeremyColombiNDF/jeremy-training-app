@@ -1,40 +1,41 @@
-# Série — version 1.0
+# Série — version 1.1.0
 
 Série transforme un programme sportif conçu dans ChatGPT en carnet d’entraînement interactif, sans imposer de méthode de programmation.
 
 ## Principe
 
-1. L’utilisateur crée un profil dans l’application.
-2. Il copie le prompt de configuration depuis `Données > Connecter ChatGPT`.
-3. Il colle ce prompt dans sa conversation ChatGPT habituelle.
+1. L’utilisateur choisit ou crée un profil dans la liste commune.
+2. Lors de la première ouverture sur un appareil, il saisit le code à 4 chiffres du profil.
+3. Il copie le prompt de configuration depuis `Données > Connecter ChatGPT`.
 4. ChatGPT convertit le dernier programme validé au format Série.
-5. L’utilisateur importe la réponse et suit ses séances.
-6. En fin de semaine, Série génère un bilan structuré à redonner à ChatGPT.
+5. L’utilisateur importe la réponse, suit ses séances et exporte son bilan hebdomadaire.
 
 ChatGPT reste le coach ou le générateur de programme. Série reste l’outil d’exécution, de saisie, d’historique et d’échange.
 
-## Fonctionnalités
+## Nouveautés de la version 1.1
 
-- plusieurs profils sur un même appareil ;
+- répertoire global de profils partagé entre tous les appareils ;
+- apparition automatique d’un profil après sa création et sa synchronisation ;
+- code personnel à 4 chiffres demandé uniquement lors de la première ouverture sur un appareil ;
+- mémorisation de l’accès sur l’appareil ;
+- code administrateur universel vérifié exclusivement côté serveur ;
+- migration guidée des profils créés avec Série 1.0 ;
+- conservation du programme, des pesées, de l’historique et des résultats ;
+- suppression des liens personnels entre appareils.
+
+## Fonctionnalités principales
+
 - couleur principale propre à chaque profil ;
-- sélection du profil au lancement ;
-- création de profil sans compte ni mot de passe ;
-- lien personnel de récupération et d’accès sur un autre appareil ;
 - synchronisation D1 isolée par profil ;
-- partage du lien public de l’application à un ami, sans partager son propre profil ;
 - assistant pédagogique de connexion à ChatGPT ;
-- prompt de configuration et demande de conversion copiables ;
 - import de programmes en schéma `1.1` ;
-- programmes de longueur libre ;
-- charges fixes, répétitions, plages de répétitions, durée, distance, RPE, RIR, tempo et supersets ;
-- mode séance immersif ;
-- validation rapide ou saisie détaillée ;
-- chronomètre de repos ;
-- problèmes, douleurs, vidéo et non-réalisation documentés ;
+- charges fixes, plages de répétitions, durée, distance, RPE, RIR, tempo et supersets ;
+- mode séance immersif, validation rapide et chronomètre ;
+- suivi des problèmes, douleurs, vidéos et séances non réalisées ;
 - bilan hebdomadaire exportable vers ChatGPT ;
 - historique des semaines, records et pesées ;
 - graphique de poids avec moyenne mobile ;
-- fonctionnement hors connexion ;
+- fonctionnement hors connexion après la première ouverture du profil ;
 - mode clair et sombre automatiques ;
 - sauvegarde et restauration JSON.
 
@@ -46,40 +47,45 @@ Le projet est prévu pour Cloudflare Pages avec intégration GitHub.
 - Build output directory : `public`
 - Production branch : `main`
 
-Le dossier `functions` doit rester à la racine du dépôt. Il contient l’API de synchronisation.
+Le dossier `functions` doit rester à la racine du dépôt.
 
-Après remplacement des fichiers :
+## Configuration serveur indispensable
 
-1. ouvrir GitHub Desktop ;
-2. effectuer un commit ;
-3. cliquer sur `Push origin` ;
-4. laisser Cloudflare Pages redéployer automatiquement.
+La base D1 doit être liée au projet Pages sous le nom exact `DB`.
 
-## Synchronisation Cloudflare D1
+Le code administrateur doit être ajouté comme secret serveur :
 
-La base D1 doit être liée au projet Pages sous le nom exact `DB`. Si la version précédente était déjà synchronisée, aucune nouvelle liaison n’est nécessaire. La table multi-profils est créée automatiquement au premier échange.
+```text
+ADMIN_PIN = votre code administrateur
+```
+
+Ne place pas ce code dans `app.js`, GitHub ou un fichier public. La fonction Cloudflare le lit uniquement côté serveur.
+
+Après toute modification des bindings ou secrets, relancer un déploiement Cloudflare.
 
 Voir [`docs/CONFIGURATION_SYNCHRONISATION.md`](docs/CONFIGURATION_SYNCHRONISATION.md).
 
-## Compatibilité avec les anciennes données
+## Migration depuis Série 1.0
 
-Au premier lancement de la version 1.0 :
+Les anciens profils restent disponibles localement et apparaissent avec la mention `À publier`.
 
-- les données locales de l’ancienne application sont converties en profil ;
-- le programme, l’historique, les pesées et les résultats sont conservés ;
-- les appareils possédant le même ancien état génèrent le même identifiant de migration afin de retrouver une synchronisation commune.
+Lors de leur première sélection :
 
-Une sauvegarde préalable reste recommandée.
+1. choisir un code personnel à 4 chiffres ;
+2. publier le profil dans la liste commune ;
+3. conserver automatiquement les données locales ou la version distante la plus récente de l’ancien système ;
+4. retrouver ensuite le profil sur tous les appareils.
 
-Le pas-à-pas de mise à jour se trouve dans [`docs/MIGRATION_V1.md`](docs/MIGRATION_V1.md).
+Voir [`docs/MIGRATION_SERIE_1_1.md`](docs/MIGRATION_SERIE_1_1.md).
 
 ## Structure du projet
 
 ```text
-public/                 interface PWA
-functions/api/sync.js   API Cloudflare Pages Functions
-migrations/             schémas SQL de référence
-docs/                   guides et format d’import
+public/                    interface PWA
+functions/api/profiles.js  répertoire, codes et sessions d’appareil
+functions/api/sync.js      synchronisation des données du profil
+migrations/                schémas SQL de référence
+docs/                      guides et format d’import
 ```
 
 ## Test local
@@ -88,4 +94,4 @@ docs/                   guides et format d’import
 python3 -m http.server 8000 --directory public
 ```
 
-Puis ouvrir `http://localhost:8000`. La synchronisation distante nécessite l’environnement Cloudflare ; toutes les fonctions locales restent utilisables sans lui.
+L’interface locale fonctionne, mais la création, le déverrouillage et la synchronisation nécessitent l’environnement Cloudflare.

@@ -8,9 +8,10 @@ const PROFILE_STATE_PREFIX = "serie_profile_state_v1_";
 const PROFILE_SYNC_PREFIX = "serie_profile_sync_v1_";
 const APP_SCHEMA = "1.1";
 const SUPPORTED_SCHEMAS = new Set(["1.0", "1.1"]);
-const APP_VERSION = "1.0";
+const APP_VERSION = "1.1.0";
 const CHAT_PROMPT_VERSION = "1.1";
 const SYNC_ENDPOINT = "/api/sync";
+const PROFILES_ENDPOINT = "/api/profiles";
 const SYNC_DELAY_MS = 1800;
 
 const PROFILE_COLORS = {
@@ -286,10 +287,7 @@ function buildProfileLink(profile = activeProfile) {
   return `${location.origin}${location.pathname}#${params.toString()}`;
 }
 
-function parseProfileInvite() {
-  const raw = location.hash.replace(/^#/, "");
-  if (!raw) return null;
-  const params = new URLSearchParams(raw);
+function profileInviteFromParams(params) {
   const id = params.get("profile") || "";
   const accessToken = params.get("key") || "";
   if (!/^p_[a-z0-9_-]{12,80}$/i.test(id) || accessToken.length < 24) return null;
@@ -299,8 +297,33 @@ function parseProfileInvite() {
     name: (params.get("name") || "Profil partagé").slice(0, 32),
     color: PROFILE_COLORS[params.get("color")] ? params.get("color") : "blue",
     created_at: new Date().toISOString(),
-    last_opened_at: ""
+    last_opened_at: "",
+    source: "shared"
   };
+}
+
+function parseProfileInvite() {
+  const raw = location.hash.replace(/^#/, "");
+  if (!raw) return null;
+  return profileInviteFromParams(new URLSearchParams(raw));
+}
+
+function parseProfileInviteText(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw, location.origin);
+    const hash = url.hash.replace(/^#/, "");
+    if (hash) return profileInviteFromParams(new URLSearchParams(hash));
+    if (url.search) return profileInviteFromParams(url.searchParams);
+  } catch (error) {
+    // Le champ peut aussi contenir uniquement la partie après le #.
+  }
+  return profileInviteFromParams(new URLSearchParams(raw.replace(/^#/, "")));
+}
+
+function shortProfileId(profile = activeProfile) {
+  return String(profile?.id || "").replace(/^p_/, "").slice(-6).toUpperCase();
 }
 
 function addInviteProfile(invite) {
@@ -330,8 +353,8 @@ function renderProfileGate() {
   });
   $("#profileGateTitle").textContent = profiles.length ? "Choisir un profil" : "Bienvenue";
   $("#profileGateSubtitle").textContent = profiles.length
-    ? "Chaque profil garde son programme, son historique et sa couleur."
-    : "Crée ton espace en quelques secondes. Aucun compte ni mot de passe.";
+    ? "Ces profils sont enregistrés sur cet appareil. Utilise un lien personnel pour retrouver le même profil ailleurs."
+    : "Crée un nouvel espace ou ouvre un profil déjà utilisé sur un autre appareil.";
   $("#profileGateList").innerHTML = profiles.map((profile, index) => {
     const theme = profileColor(profile);
     return `<button class="profile-gate-item ${index === 0 ? "featured" : ""}" type="button" data-profile-id="${escapeHtml(profile.id)}" style="--profile-card-accent:${theme.accent};--profile-card-soft:${theme.soft}">
@@ -606,7 +629,32 @@ function openProfileSettings() {
   $("#editProfileName").value = activeProfile.name;
   selectedEditProfileColor = activeProfile.color;
   renderProfileColorChoices($("#editProfileColors"), selectedEditProfileColor, "editProfileColor");
+  $("#profileTechnicalId").textContent = `Code de vérification : ${shortProfileId(activeProfile)}`;
   $("#profileSettingsDialog").showModal();
+}
+
+function openImportProfileDialog() {
+  $("#existingProfileLink").value = "";
+  $("#profileSwitcherDialog")?.close();
+  $("#importProfileDialog").showModal();
+  window.setTimeout(() => $("#existingProfileLink")?.focus(), 100);
+}
+
+function importExistingProfile(event) {
+  event.preventDefault();
+  const invite = parseProfileInviteText($("#existingProfileLink").value);
+  if (!invite) {
+    toast("Lien de profil invalide");
+    return;
+  }
+  const sameId = profileRegistry.profiles.find(item => item.id === invite.id);
+  const sameName = profileRegistry.profiles.find(item => item.id !== invite.id && item.name.trim().toLowerCase() === invite.name.trim().toLowerCase());
+  const profile = addInviteProfile(invite);
+  $("#importProfileDialog").close();
+  activateProfile(profile.id, { invited: true });
+  if (sameId) toast("Profil déjà présent : accès actualisé");
+  else if (sameName) toast("Profil partagé ajouté séparément de l’ancien profil du même nom");
+  else toast("Profil partagé ajouté sur cet appareil");
 }
 
 function saveProfileSettings(event) {
@@ -653,25 +701,43 @@ async function copyProfileLink() {
   toast("Lien du profil copié");
 }
 
+function detachProfileLocally(profile) {
+  storage.removeItem(profileStateKey(profile.id));
+  storage.removeItem(profileSyncKey(profile.id));
+  profileRegistry.profiles = profileRegistry.profiles.filter(item => item.id !== profile.id);
+  profileRegistry.last_profile_id = profileRegistry.profiles[0]?.id || "";
+  saveProfileRegistry();
+  activeProfile = null;
+  state = null;
+  syncMeta = null;
+  $("#profileSettingsDialog").close();
+  renderProfileGate();
+}
+
+function removeCurrentProfileFromDevice() {
+  if (!activeProfile) return;
+  const profile = activeProfile;
+  confirmAction(
+    `Retirer ${profile.name} de cet appareil ?`,
+    "La version en ligne et les autres appareils ne seront pas modifiés. Tu pourras le rouvrir ici avec son lien personnel.",
+    () => detachProfileLocally(profile)
+  );
+}
+
 function deleteCurrentProfile() {
   if (!activeProfile) return;
   const profile = activeProfile;
   confirmAction(
-    `Supprimer ${profile.name} ?`,
-    "Le programme et l’historique seront supprimés de cet appareil et de la synchronisation en ligne. Télécharge une sauvegarde auparavant si nécessaire.",
-    async () => {
-      try { await deleteRemoteProfile(profile); } catch (error) { console.warn("Suppression distante impossible", error); }
-      storage.removeItem(profileStateKey(profile.id));
-      storage.removeItem(profileSyncKey(profile.id));
-      profileRegistry.profiles = profileRegistry.profiles.filter(item => item.id !== profile.id);
-      profileRegistry.last_profile_id = profileRegistry.profiles[0]?.id || "";
-      saveProfileRegistry();
-      activeProfile = null;
-      state = null;
-      syncMeta = null;
-      $("#profileSettingsDialog").close();
-      renderProfileGate();
-    }
+    `Supprimer ${profile.name} partout ?`,
+    "Cette action efface la version en ligne. Elle ne doit être utilisée que si tu veux réellement supprimer le profil sur tous les appareils.",
+    () => confirmAction(
+      "Confirmation définitive",
+      `Le profil ${profile.name} et sa synchronisation seront supprimés. Cette action est irréversible.`,
+      async () => {
+        try { await deleteRemoteProfile(profile); } catch (error) { console.warn("Suppression distante impossible", error); }
+        detachProfileLocally(profile);
+      }
+    )
   );
 }
 
@@ -703,6 +769,7 @@ function init() {
 
 function bindProfileEvents() {
   $("#createProfileFromGate").addEventListener("click", openCreateProfileDialog);
+  $("#importProfileFromGate").addEventListener("click", openImportProfileDialog);
   $("#profileMenuBtn").addEventListener("click", openProfileSwitcher);
   $("#openProfileSettingsBtn").addEventListener("click", openProfileSettings);
   $("#closeCreateProfile").addEventListener("click", () => $("#createProfileDialog").close());
@@ -719,6 +786,9 @@ function bindProfileEvents() {
     $("#profileSwitcherDialog").close();
     openCreateProfileDialog();
   });
+  $("#importProfileFromSwitcher").addEventListener("click", openImportProfileDialog);
+  $("#closeImportProfile").addEventListener("click", () => $("#importProfileDialog").close());
+  $("#importProfileForm").addEventListener("submit", importExistingProfile);
   $("#manageCurrentProfileBtn").addEventListener("click", () => {
     $("#profileSwitcherDialog").close();
     openProfileSettings();
@@ -730,6 +800,7 @@ function bindProfileEvents() {
     if (event.target.matches('input[name="editProfileColor"]')) selectedEditProfileColor = event.target.value;
   });
   $("#copyProfileLinkBtn").addEventListener("click", copyProfileLink);
+  $("#removeProfileFromDeviceBtn").addEventListener("click", removeCurrentProfileFromDevice);
   $("#deleteProfileBtn").addEventListener("click", deleteCurrentProfile);
 
   $("#copyChatSetupPromptBtn").addEventListener("click", copyChatSetupPrompt);
@@ -829,7 +900,7 @@ function bindStaticEvents() {
   $("#previewImportBtn").addEventListener("click", previewImport);
   $("#backupBtn").addEventListener("click", downloadBackup);
   $("#restoreInput").addEventListener("change", restoreBackup);
-  $("#syncNowBtn").addEventListener("click", () => synchronize({ reason: "manual" }));
+  $("#syncNowBtn").addEventListener("click", async () => { await synchronize({ reason: "manual" }); await refreshGlobalProfiles({ silent: true, render: false }); });
   $("#pushLocalBtn").addEventListener("click", forcePushCurrentState);
   $("#pullRemoteBtn").addEventListener("click", forcePullRemoteState);
   $("#useRemoteBtn").addEventListener("click", resolveConflictWithRemote);
@@ -3101,6 +3172,785 @@ function cameraIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><pat
 function alertIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.4 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0Z"/></svg>`; }
 function scaleIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14a2 2 0 0 0 2-2V8a5 5 0 0 0-5-5H8a5 5 0 0 0-5 5v10a2 2 0 0 0 2 2Z"/><path d="M9 9a3 3 0 0 1 6 0M12 9l2-2"/></svg>`; }
 function trophyIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0V4Z"/><path d="M8 6H4v1a4 4 0 0 0 4 4m8-5h4v1a4 4 0 0 1-4 4M12 12v5m-4 3h8"/></svg>`; }
+
+
+/* Série 1.1 — répertoire global de profils et déverrouillage par code */
+let globalProfileDirectory = [];
+let profilesLoading = false;
+let profileDirectoryError = "";
+let pendingUnlockProfile = null;
+let pendingLegacyProfile = null;
+
+function loadProfileRegistry() {
+  try {
+    const parsed = JSON.parse(storage.getItem(PROFILE_REGISTRY_KEY) || "null");
+    if (!parsed || !Array.isArray(parsed.profiles)) return { version: 2, last_profile_id: "", profiles: [] };
+    return {
+      version: 2,
+      last_profile_id: parsed.last_profile_id || "",
+      profiles: parsed.profiles.filter(profile => profile?.id).map(profile => {
+        const sessionToken = String(profile.session_token || "");
+        const legacyToken = String(profile.legacy_access_token || (!sessionToken && profile.access_token ? profile.access_token : ""));
+        return {
+          id: profile.id,
+          session_token: sessionToken,
+          legacy_access_token: legacyToken,
+          name: String(profile.name || "Profil").slice(0, 32),
+          color: PROFILE_COLORS[profile.color] ? profile.color : "blue",
+          created_at: profile.created_at || new Date().toISOString(),
+          last_opened_at: profile.last_opened_at || "",
+          remote: Boolean(profile.remote || sessionToken),
+          source: profile.source || (legacyToken ? "legacy" : "global")
+        };
+      })
+    };
+  } catch (error) {
+    console.warn("Impossible de charger les profils", error);
+    return { version: 2, last_profile_id: "", profiles: [] };
+  }
+}
+
+function legacyProfileRecord(parsed, name) {
+  const seedState = clone(parsed);
+  delete seedState.updated_at;
+  delete seedState.app_version;
+  delete seedState.profile;
+  const digest = hash128(JSON.stringify(seedState));
+  return {
+    id: `p_${digest}`,
+    session_token: "",
+    legacy_access_token: `k_${hash128(`serie-legacy-${digest}`)}`,
+    name: String(name || "Profil importé").slice(0, 32),
+    color: "blue",
+    created_at: new Date().toISOString(),
+    last_opened_at: "",
+    remote: false,
+    source: "legacy"
+  };
+}
+
+function createProfileRecord(name, color = "blue") {
+  return {
+    id: `p_${cryptoRandomId(18)}`,
+    session_token: "",
+    legacy_access_token: "",
+    name: String(name || "Profil").trim().slice(0, 32) || "Profil",
+    color: PROFILE_COLORS[color] ? color : "blue",
+    created_at: new Date().toISOString(),
+    last_opened_at: "",
+    remote: false,
+    source: "global"
+  };
+}
+
+function migrateLegacyProfileIfNeeded() {
+  if (profileRegistry.profiles.length) return;
+  const raw = storage.getItem(LEGACY_STORAGE_KEY_V2) || storage.getItem(LEGACY_STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed?.week || !Array.isArray(parsed.week.sessions)) return;
+    const name = parsed.athlete_profile?.name || parsed.profile?.name || "Profil importé";
+    const profile = legacyProfileRecord(parsed, name);
+    profileRegistry.profiles.push(profile);
+    profileRegistry.last_profile_id = profile.id;
+    saveProfileRegistry();
+    parsed.profile = { id: profile.id, name: profile.name, color: profile.color };
+    storage.setItem(profileStateKey(profile.id), JSON.stringify(parsed));
+    storage.setItem(profileSyncKey(profile.id), JSON.stringify({
+      device_id: createDeviceId(), remote_revision: 0, last_synced_at: "", dirty: true,
+      configured: null, last_error: ""
+    }));
+  } catch (error) {
+    console.warn("Migration de l’ancien profil impossible", error);
+  }
+}
+
+function localProfileById(profileId) {
+  return profileRegistry.profiles.find(profile => profile.id === profileId) || null;
+}
+
+function globalProfileById(profileId) {
+  return globalProfileDirectory.find(profile => profile.id === profileId) || null;
+}
+
+function upsertLocalProfile(profile) {
+  const index = profileRegistry.profiles.findIndex(item => item.id === profile.id);
+  if (index >= 0) profileRegistry.profiles[index] = { ...profileRegistry.profiles[index], ...profile };
+  else profileRegistry.profiles.push(profile);
+  saveProfileRegistry();
+  return profileRegistry.profiles.find(item => item.id === profile.id);
+}
+
+function mergedProfileList() {
+  const map = new Map();
+  globalProfileDirectory.forEach(remote => {
+    const local = localProfileById(remote.id);
+    map.set(remote.id, {
+      ...remote,
+      ...(local || {}),
+      name: remote.name,
+      color: remote.color,
+      remote: true,
+      source: "global"
+    });
+  });
+  profileRegistry.profiles.forEach(local => {
+    if (!map.has(local.id)) map.set(local.id, { ...local, remote: false, source: local.legacy_access_token ? "legacy" : local.source });
+  });
+  return [...map.values()].sort((a, b) => {
+    if (a.id === profileRegistry.last_profile_id) return -1;
+    if (b.id === profileRegistry.last_profile_id) return 1;
+    const aDate = globalProfileById(a.id)?.updated_at || a.last_opened_at || a.created_at || "";
+    const bDate = globalProfileById(b.id)?.updated_at || b.last_opened_at || b.created_at || "";
+    return String(bDate).localeCompare(String(aDate)) || a.name.localeCompare(b.name, "fr");
+  });
+}
+
+function profileAccessStatus(profile) {
+  if (profile.session_token) return { label: activeProfile?.id === profile.id ? "Profil ouvert" : "Ouverture directe", kind: "trusted" };
+  if (profile.remote) return { label: "Code requis", kind: "locked" };
+  return { label: "À publier", kind: "legacy" };
+}
+
+function profileCardMarkup(profile, { active = false, featured = false } = {}) {
+  const theme = profileColor(profile);
+  const access = profileAccessStatus(profile);
+  const trailing = active ? checkIcon() : access.kind === "locked"
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`
+    : chevronRightIcon();
+  return `<button class="profile-gate-item ${featured ? "featured" : ""} ${active ? "active" : ""}" type="button" data-profile-id="${escapeHtml(profile.id)}" style="--profile-card-accent:${theme.accent};--profile-card-soft:${theme.soft}">
+    <span class="profile-gate-avatar">${escapeHtml(initialsFor(profile.name))}</span>
+    <span class="profile-gate-copy"><strong>${escapeHtml(profile.name)}</strong><small class="profile-access-${access.kind}">${escapeHtml(access.label)}</small></span>
+    <span class="profile-gate-chevron">${trailing}</span>
+  </button>`;
+}
+
+async function refreshGlobalProfiles({ silent = false, render = true } = {}) {
+  if (profilesLoading) return globalProfileDirectory;
+  if (!navigator.onLine) {
+    profileDirectoryError = "Hors connexion";
+    if (render) renderProfileGate();
+    return globalProfileDirectory;
+  }
+  profilesLoading = true;
+  profileDirectoryError = "";
+  renderProfileDirectoryStatus();
+  try {
+    const response = await fetchWithTimeout(PROFILES_ENDPOINT, { headers: { accept: "application/json" }, cache: "no-store" });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      const error = new Error(payload.message || "Liste des profils indisponible.");
+      error.code = payload.error;
+      error.status = response.status;
+      throw error;
+    }
+    globalProfileDirectory = Array.isArray(payload.profiles) ? payload.profiles.map(profile => ({
+      id: profile.id,
+      name: String(profile.name || "Profil").slice(0, 32),
+      color: PROFILE_COLORS[profile.color] ? profile.color : "blue",
+      updated_at: profile.updated_at || "",
+      created_at: profile.created_at || "",
+      remote: true,
+      source: "global"
+    })) : [];
+    let changed = false;
+    globalProfileDirectory.forEach(remote => {
+      const local = localProfileById(remote.id);
+      if (!local) return;
+      if (local.name !== remote.name || local.color !== remote.color || !local.remote) {
+        local.name = remote.name;
+        local.color = remote.color;
+        local.remote = true;
+        local.source = "global";
+        changed = true;
+      }
+    });
+    if (changed) saveProfileRegistry();
+    if (activeProfile) {
+      const remote = globalProfileById(activeProfile.id);
+      if (remote) {
+        activeProfile.name = remote.name;
+        activeProfile.color = remote.color;
+        applyProfileTheme();
+        renderProfileUI();
+      }
+    }
+    if (!silent && document.body.classList.contains("profile-gate-open")) toast("Liste des profils actualisée");
+  } catch (error) {
+    profileDirectoryError = error.code === "DB_NOT_CONFIGURED" ? "Synchronisation à configurer" : "Liste en ligne indisponible";
+    console.warn("Liste des profils indisponible", error);
+    if (!silent) toast(profileDirectoryError);
+  } finally {
+    profilesLoading = false;
+    if (render) {
+      if (!activeProfile || document.body.classList.contains("profile-gate-open")) renderProfileGate();
+      if ($("#profileSwitcherDialog")?.open) renderProfileSwitcher();
+    } else renderProfileDirectoryStatus();
+  }
+  return globalProfileDirectory;
+}
+
+function renderProfileDirectoryStatus() {
+  const status = $("#profileDirectoryStatus");
+  if (!status) return;
+  if (profilesLoading) status.textContent = "Actualisation de la liste commune…";
+  else if (profileDirectoryError) status.textContent = `${profileDirectoryError}. Les profils déjà ouverts restent disponibles.`;
+  else if (globalProfileDirectory.length) status.textContent = `${globalProfileDirectory.length} profil${globalProfileDirectory.length > 1 ? "s" : ""} dans la liste commune`;
+  else status.textContent = "Aucun profil synchronisé pour le moment.";
+  $("#refreshProfilesGate")?.classList.toggle("syncing", profilesLoading);
+}
+
+function renderProfileGate() {
+  const gate = $("#profileGate");
+  if (!gate) return;
+  const profiles = mergedProfileList();
+  $("#profileGateTitle").textContent = profiles.length ? "Choisir un profil" : "Bienvenue";
+  $("#profileGateSubtitle").textContent = profiles.length
+    ? "Tous les profils synchronisés sont accessibles depuis cette liste."
+    : "Crée le premier profil pour commencer.";
+  $("#profileGateList").innerHTML = profiles.map((profile, index) => profileCardMarkup(profile, { featured: index === 0 })).join("");
+  $$("#profileGateList .profile-gate-item").forEach(button => button.addEventListener("click", () => handleProfileSelection(button.dataset.profileId)));
+  renderProfileDirectoryStatus();
+  gate.classList.remove("hidden");
+  document.body.classList.add("profile-gate-open");
+}
+
+function handleProfileSelection(profileId) {
+  const profile = mergedProfileList().find(item => item.id === profileId);
+  if (!profile) return;
+  const local = localProfileById(profileId);
+  if (local?.session_token) {
+    activateProfile(profileId);
+    return;
+  }
+  if (profile.remote) {
+    openUnlockProfileDialog(profile);
+    return;
+  }
+  openPublishLegacyDialog(local || profile);
+}
+
+function openCreateProfileDialog() {
+  selectedNewProfileColor = "blue";
+  $("#newProfileName").value = "";
+  $("#newProfilePin").value = "";
+  $("#newProfilePinConfirm").value = "";
+  $("#newProfilePreviewName").textContent = "Ton profil";
+  $("#newProfilePreviewAvatar").textContent = "?";
+  renderProfileColorChoices($("#newProfileColors"), selectedNewProfileColor, "newProfileColor");
+  updateNewProfilePreview();
+  $("#createProfileDialog").showModal();
+  window.setTimeout(() => $("#newProfileName").focus(), 120);
+}
+
+async function profileApiRequest(method, body = null, profile = null) {
+  const headers = { accept: "application/json" };
+  if (body) headers["content-type"] = "application/json";
+  if (profile?.session_token) headers.authorization = `Bearer ${profile.session_token}`;
+  const profileId = body?.profile_id || profile?.id;
+  const url = method === "DELETE" && profileId ? `${PROFILES_ENDPOINT}?profile_id=${encodeURIComponent(profileId)}` : PROFILES_ENDPOINT;
+  const response = await fetchWithTimeout(url, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: "no-store" });
+  const payload = await safeJson(response);
+  if (!response.ok) {
+    const error = new Error(payload.message || "Opération impossible.");
+    error.status = response.status;
+    error.code = payload.error;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+function storeUnlockedProfile(payload, fallbackProfile = null) {
+  const remote = payload.profile || fallbackProfile;
+  const existing = localProfileById(remote.id) || fallbackProfile || {};
+  const local = upsertLocalProfile({
+    ...existing,
+    id: remote.id,
+    name: remote.name || existing.name || "Profil",
+    color: PROFILE_COLORS[remote.color] ? remote.color : (existing.color || "blue"),
+    session_token: payload.session_token || existing.session_token || "",
+    legacy_access_token: "",
+    remote: true,
+    source: "global",
+    created_at: remote.created_at || existing.created_at || new Date().toISOString(),
+    last_opened_at: new Date().toISOString()
+  });
+  const incomingState = payload.state ? clone(payload.state) : makeInitialState(null, [], local);
+  incomingState.profile = { id: local.id, name: local.name, color: local.color };
+  storage.setItem(profileStateKey(local.id), JSON.stringify(incomingState));
+  const previousMeta = (() => {
+    try { return JSON.parse(storage.getItem(profileSyncKey(local.id)) || "{}"); }
+    catch { return {}; }
+  })();
+  storage.setItem(profileSyncKey(local.id), JSON.stringify({
+    device_id: previousMeta.device_id || createDeviceId(),
+    remote_revision: Number(payload.revision || 0),
+    last_synced_at: payload.updated_at || new Date().toISOString(),
+    dirty: false,
+    configured: true,
+    last_error: ""
+  }));
+  profileRegistry.last_profile_id = local.id;
+  saveProfileRegistry();
+  return local;
+}
+
+async function createProfileFromForm(event) {
+  event.preventDefault();
+  if (!navigator.onLine) return toast("Une connexion est nécessaire pour créer un profil partagé");
+  const name = $("#newProfileName").value.trim();
+  const pin = $("#newProfilePin").value.trim();
+  const confirmation = $("#newProfilePinConfirm").value.trim();
+  if (!/^\d{4}$/.test(pin)) return toast("Choisis un code de 4 chiffres");
+  if (pin !== confirmation) return toast("Les deux codes ne correspondent pas");
+  const profile = createProfileRecord(name, selectedNewProfileColor);
+  const initialState = makeInitialState(null, [], profile);
+  const submit = $("#createProfileForm button[type='submit']");
+  submit.disabled = true;
+  submit.textContent = "Création…";
+  try {
+    const payload = await profileApiRequest("POST", {
+      action: "create",
+      profile_id: profile.id,
+      name: profile.name,
+      color: profile.color,
+      pin,
+      state: initialState,
+      device_id: createDeviceId()
+    });
+    const stored = storeUnlockedProfile(payload, profile);
+    await refreshGlobalProfiles({ silent: true, render: false });
+    $("#createProfileDialog").close();
+    $("#profileSwitcherDialog")?.close();
+    activateProfile(stored.id);
+    $("#chatOnboardingDialog").showModal();
+  } catch (error) {
+    toast(error.message || "Création impossible");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Créer le profil";
+  }
+}
+
+function profilePreviewMarkup(profile) {
+  const theme = profileColor(profile);
+  return `<span class="profile-preview-avatar" style="--preview-color:${theme.accent}">${escapeHtml(initialsFor(profile.name))}</span><div><strong>${escapeHtml(profile.name)}</strong><small>${profile.remote ? "Profil synchronisé" : "Profil présent sur cet appareil"}</small></div>`;
+}
+
+function openUnlockProfileDialog(profile) {
+  pendingUnlockProfile = profile;
+  $("#unlockProfileTitle").textContent = `Ouvrir ${profile.name}`;
+  $("#unlockProfilePreview").innerHTML = profilePreviewMarkup(profile);
+  $("#unlockProfilePin").value = "";
+  $("#unlockProfileDialog").showModal();
+  window.setTimeout(() => $("#unlockProfilePin").focus(), 120);
+}
+
+async function unlockProfileFromForm(event) {
+  event.preventDefault();
+  if (!pendingUnlockProfile) return;
+  if (!navigator.onLine) return toast("Une connexion est nécessaire pour la première ouverture");
+  const pin = $("#unlockProfilePin").value.trim();
+  if (!/^\d{4}$/.test(pin)) return toast("Saisis les 4 chiffres du code");
+  const submit = $("#unlockProfileSubmit");
+  submit.disabled = true;
+  submit.textContent = "Ouverture…";
+  try {
+    const payload = await profileApiRequest("POST", { action: "unlock", profile_id: pendingUnlockProfile.id, pin });
+    const stored = storeUnlockedProfile(payload, pendingUnlockProfile);
+    $("#unlockProfileDialog").close();
+    $("#profileSwitcherDialog")?.close();
+    pendingUnlockProfile = null;
+    activateProfile(stored.id);
+  } catch (error) {
+    $("#unlockProfilePin").select();
+    toast(error.code === "INVALID_PROFILE_PIN" ? "Code incorrect" : (error.message || "Ouverture impossible"));
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Ouvrir le profil";
+  }
+}
+
+function openPublishLegacyDialog(profile) {
+  pendingLegacyProfile = profile;
+  $("#publishProfilePreview").innerHTML = profilePreviewMarkup(profile);
+  $("#publishProfilePin").value = "";
+  $("#publishProfilePinConfirm").value = "";
+  $("#publishProfileDialog").showModal();
+  window.setTimeout(() => $("#publishProfilePin").focus(), 120);
+}
+
+async function publishLegacyProfileFromForm(event) {
+  event.preventDefault();
+  if (!pendingLegacyProfile) return;
+  if (!navigator.onLine) return toast("Une connexion est nécessaire pour publier ce profil");
+  const pin = $("#publishProfilePin").value.trim();
+  const confirmation = $("#publishProfilePinConfirm").value.trim();
+  if (!/^\d{4}$/.test(pin)) return toast("Choisis un code de 4 chiffres");
+  if (pin !== confirmation) return toast("Les deux codes ne correspondent pas");
+  const raw = storage.getItem(profileStateKey(pendingLegacyProfile.id));
+  let localState;
+  try { localState = raw ? JSON.parse(raw) : makeInitialState(null, [], pendingLegacyProfile); }
+  catch { localState = makeInitialState(null, [], pendingLegacyProfile); }
+  const meta = (() => {
+    try { return JSON.parse(storage.getItem(profileSyncKey(pendingLegacyProfile.id)) || "{}"); }
+    catch { return {}; }
+  })();
+  const submit = $("#publishProfileSubmit");
+  submit.disabled = true;
+  submit.textContent = "Publication…";
+  try {
+    const payload = await profileApiRequest("POST", {
+      action: "publish_legacy",
+      profile_id: pendingLegacyProfile.id,
+      legacy_token: pendingLegacyProfile.legacy_access_token || "",
+      name: pendingLegacyProfile.name,
+      color: pendingLegacyProfile.color,
+      pin,
+      state: localState,
+      device_id: meta.device_id || createDeviceId()
+    });
+    const stored = storeUnlockedProfile(payload, pendingLegacyProfile);
+    $("#publishProfileDialog").close();
+    pendingLegacyProfile = null;
+    await refreshGlobalProfiles({ silent: true, render: false });
+    activateProfile(stored.id);
+    toast("Profil publié dans la liste commune");
+  } catch (error) {
+    if (error.code === "PROFILE_ALREADY_EXISTS") {
+      $("#publishProfileDialog").close();
+      await refreshGlobalProfiles({ silent: true });
+      const remote = globalProfileById(pendingLegacyProfile.id) || error.payload?.profile;
+      pendingLegacyProfile = null;
+      if (remote) openUnlockProfileDialog({ ...remote, remote: true });
+      toast("Ce profil existe déjà : saisis son code");
+    } else toast(error.message || "Publication impossible");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Publier et synchroniser";
+  }
+}
+
+function renderProfileSwitcher() {
+  const profiles = mergedProfileList();
+  $("#profileSwitcherList").innerHTML = profiles.map(profile => profileCardMarkup(profile, { active: profile.id === activeProfile?.id })).join("");
+  $$("#profileSwitcherList .profile-gate-item").forEach(button => button.addEventListener("click", () => {
+    if (button.dataset.profileId === activeProfile?.id) return;
+    $("#profileSwitcherDialog").close();
+    handleProfileSelection(button.dataset.profileId);
+  }));
+}
+
+async function openProfileSwitcher() {
+  renderProfileSwitcher();
+  $("#profileSwitcherDialog").showModal();
+  await refreshGlobalProfiles({ silent: true });
+}
+
+function openProfileSettings() {
+  if (!activeProfile) return;
+  $("#editProfileName").value = activeProfile.name;
+  $("#editProfilePin").value = "";
+  selectedEditProfileColor = activeProfile.color;
+  renderProfileColorChoices($("#editProfileColors"), selectedEditProfileColor, "editProfileColor");
+  $("#profileTechnicalId").textContent = `Identifiant : ${shortProfileId(activeProfile)}`;
+  $("#profileSettingsDialog").showModal();
+}
+
+async function saveProfileSettings(event) {
+  event.preventDefault();
+  if (!activeProfile) return;
+  const name = $("#editProfileName").value.trim();
+  const newPin = $("#editProfilePin").value.trim();
+  if (!name) return;
+  if (newPin && !/^\d{4}$/.test(newPin)) return toast("Le nouveau code doit contenir 4 chiffres");
+  if (newPin && !navigator.onLine) return toast("Connecte-toi pour modifier le code");
+  const nextColor = PROFILE_COLORS[selectedEditProfileColor] ? selectedEditProfileColor : "blue";
+  const submit = $("#profileSettingsForm button[type='submit']");
+  submit.disabled = true;
+  try {
+    if (navigator.onLine) {
+      await profileApiRequest("PATCH", {
+        profile_id: activeProfile.id,
+        name: name.slice(0, 32),
+        color: nextColor,
+        ...(newPin ? { pin: newPin } : {})
+      }, activeProfile);
+    }
+    activeProfile.name = name.slice(0, 32);
+    activeProfile.color = nextColor;
+    state.profile = { id: activeProfile.id, name: activeProfile.name, color: activeProfile.color };
+    if (!state.athlete_profile?.name) state.athlete_profile = { ...(state.athlete_profile || {}), name: activeProfile.name };
+    saveProfileRegistry();
+    applyProfileTheme();
+    saveState({ render: true });
+    renderProfileUI();
+    $("#profileSettingsDialog").close();
+    await refreshGlobalProfiles({ silent: true, render: false });
+    toast("Profil mis à jour");
+  } catch (error) {
+    handleSyncError(error, false);
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function lockCurrentProfileOnDevice() {
+  if (!activeProfile) return;
+  const profile = activeProfile;
+  confirmAction(
+    `Verrouiller ${profile.name} sur cet appareil ?`,
+    "Le profil restera visible. Son code sera demandé lors de la prochaine ouverture sur cet appareil.",
+    () => {
+      const local = localProfileById(profile.id);
+      if (local) local.session_token = "";
+      saveProfileRegistry();
+      activeProfile = null;
+      state = null;
+      syncMeta = null;
+      $("#profileSettingsDialog").close();
+      renderProfileGate();
+    }
+  );
+}
+
+function removeProfileLocally(profileId, { removeData = true } = {}) {
+  if (removeData) {
+    storage.removeItem(profileStateKey(profileId));
+    storage.removeItem(profileSyncKey(profileId));
+  }
+  profileRegistry.profiles = profileRegistry.profiles.filter(item => item.id !== profileId);
+  profileRegistry.last_profile_id = profileRegistry.profiles[0]?.id || "";
+  saveProfileRegistry();
+}
+
+function deleteCurrentProfile() {
+  if (!activeProfile) return;
+  const profile = { ...activeProfile };
+  confirmAction(
+    `Supprimer ${profile.name} partout ?`,
+    "Le profil, son programme, ses pesées et son historique seront supprimés de la liste commune.",
+    () => confirmAction(
+      "Confirmation définitive",
+      "Cette action est irréversible.",
+      async () => {
+        try {
+          await deleteRemoteProfile(profile);
+          removeProfileLocally(profile.id);
+          activeProfile = null;
+          state = null;
+          syncMeta = null;
+          $("#profileSettingsDialog").close();
+          await refreshGlobalProfiles({ silent: true });
+          renderProfileGate();
+          toast("Profil supprimé");
+        } catch (error) {
+          toast(error.message || "Suppression impossible");
+        }
+      }
+    )
+  );
+}
+
+async function deleteRemoteProfile(profile) {
+  if (!navigator.onLine || !profile) throw new Error("Connexion requise");
+  await profileApiRequest("DELETE", null, profile);
+}
+
+function activateProfile(profileId) {
+  const profile = localProfileById(profileId);
+  if (!profile?.session_token) {
+    handleProfileSelection(profileId);
+    return;
+  }
+  const remote = globalProfileById(profileId);
+  if (remote) {
+    profile.name = remote.name;
+    profile.color = remote.color;
+    profile.remote = true;
+  }
+  profileActivationVersion += 1;
+  clearTimeout(syncTimer);
+  syncInFlight = false;
+  stopTimer();
+  activeProfile = profile;
+  activeProfile.last_opened_at = new Date().toISOString();
+  profileRegistry.last_profile_id = profile.id;
+  saveProfileRegistry();
+  applyProfileTheme(profile);
+  state = loadState();
+  syncMeta = loadSyncMeta();
+  currentSessionId = findNextSession()?.id || state.week.sessions[0]?.id || null;
+  activeExerciseId = null;
+  pendingImport = null;
+  pendingRemoteConflict = null;
+  currentViewId = "weekView";
+  hideProfileGate();
+  renderProfileUI();
+  hydrateReview();
+  renderAll();
+  showView("weekView");
+  window.setTimeout(() => synchronize({ reason: "initial", silent: true }), 220);
+}
+
+async function fetchRemoteState(profile = activeProfile) {
+  if (!profile?.session_token) {
+    const error = new Error("Ce profil doit être déverrouillé.");
+    error.code = "PROFILE_SESSION_REQUIRED";
+    error.status = 401;
+    throw error;
+  }
+  const response = await fetchWithTimeout(`${SYNC_ENDPOINT}?profile_id=${encodeURIComponent(profile.id)}`, {
+    method: "GET",
+    headers: { accept: "application/json", authorization: `Bearer ${profile.session_token}` },
+    cache: "no-store"
+  });
+  const payload = await safeJson(response);
+  if (!response.ok) {
+    const error = new Error(payload.message || "La synchronisation est indisponible.");
+    error.status = response.status;
+    error.code = payload.error;
+    throw error;
+  }
+  return payload;
+}
+
+async function pushLocalState(baseRevision, { silent = false, force = false } = {}, context = null) {
+  const targetProfile = context?.profile || activeProfile;
+  const targetState = context?.state || state;
+  const targetMeta = context?.meta || syncMeta;
+  const isCurrent = context?.isCurrent || (() => targetProfile?.id === activeProfile?.id && targetState === state && targetMeta === syncMeta);
+  if (!targetProfile?.session_token || !targetState || !targetMeta) throw new Error("Aucun profil déverrouillé");
+  const response = await fetchWithTimeout(`${SYNC_ENDPOINT}?profile_id=${encodeURIComponent(targetProfile.id)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${targetProfile.session_token}` },
+    body: JSON.stringify({
+      state: targetState,
+      base_revision: Number(baseRevision || 0),
+      device_id: targetMeta.device_id,
+      client_updated_at: targetState.updated_at
+    })
+  });
+  const payload = await safeJson(response);
+  if (!isCurrent()) return false;
+  if (response.status === 409) {
+    setSyncConflict(payload);
+    showSyncConflictDialog(payload);
+    return false;
+  }
+  if (!response.ok) {
+    const error = new Error(payload.message || "Envoi impossible.");
+    error.status = response.status;
+    error.code = payload.error;
+    throw error;
+  }
+  targetMeta.remote_revision = Number(payload.revision || baseRevision + 1);
+  targetMeta.last_synced_at = payload.updated_at || new Date().toISOString();
+  targetMeta.dirty = false;
+  targetMeta.configured = true;
+  targetMeta.last_error = "";
+  storage.setItem(profileSyncKey(targetProfile.id), JSON.stringify(targetMeta));
+  pendingRemoteConflict = null;
+  if (payload.profile) {
+    const local = localProfileById(targetProfile.id);
+    if (local) {
+      local.name = payload.profile.name || local.name;
+      local.color = PROFILE_COLORS[payload.profile.color] ? payload.profile.color : local.color;
+      saveProfileRegistry();
+    }
+  }
+  if (!silent || force) toast("Données synchronisées");
+  return true;
+}
+
+function handleSyncError(error, silent) {
+  if (error?.code === "PROFILE_SESSION_REQUIRED" || error?.code === "PROFILE_SESSION_INVALID") {
+    const local = activeProfile ? localProfileById(activeProfile.id) : null;
+    if (local) local.session_token = "";
+    saveProfileRegistry();
+    activeProfile = null;
+    state = null;
+    syncMeta = null;
+    syncInFlight = false;
+    renderProfileGate();
+    if (!silent) toast("Profil verrouillé : saisis son code pour le rouvrir");
+    return;
+  }
+  if (syncMeta) {
+    syncMeta.last_error = error.code || error.message || "SYNC_FAILED";
+    if (error.status === 503 || error.code === "DB_NOT_CONFIGURED") syncMeta.configured = false;
+    persistSyncMeta();
+  }
+  if (!silent) toast(syncMeta?.configured === false ? "Base Cloudflare à configurer" : "Synchronisation impossible");
+  console.warn("Synchronisation impossible", error);
+}
+
+function init() {
+  bindStaticEvents();
+  bindProfileEvents();
+  migrateLegacyProfileIfNeeded();
+  registerServiceWorker();
+  renderProfileGate();
+  refreshGlobalProfiles({ silent: true });
+}
+
+function bindProfileEvents() {
+  $("#createProfileFromGate").addEventListener("click", openCreateProfileDialog);
+  $("#refreshProfilesGate").addEventListener("click", () => refreshGlobalProfiles({ silent: false }));
+  $("#profileMenuBtn").addEventListener("click", openProfileSwitcher);
+  $("#openProfileSettingsBtn").addEventListener("click", openProfileSettings);
+  $("#closeCreateProfile").addEventListener("click", () => $("#createProfileDialog").close());
+  $("#createProfileForm").addEventListener("submit", createProfileFromForm);
+  $("#newProfileName").addEventListener("input", updateNewProfilePreview);
+  $("#newProfileColors").addEventListener("change", event => {
+    if (!event.target.matches('input[name="newProfileColor"]')) return;
+    selectedNewProfileColor = event.target.value;
+    updateNewProfilePreview();
+  });
+
+  $("#closeProfileSwitcher").addEventListener("click", () => $("#profileSwitcherDialog").close());
+  $("#refreshProfilesSwitcher").addEventListener("click", () => refreshGlobalProfiles({ silent: false }));
+  $("#addProfileFromSwitcher").addEventListener("click", () => {
+    $("#profileSwitcherDialog").close();
+    openCreateProfileDialog();
+  });
+  $("#manageCurrentProfileBtn").addEventListener("click", () => {
+    $("#profileSwitcherDialog").close();
+    openProfileSettings();
+  });
+
+  $("#closeUnlockProfile").addEventListener("click", () => $("#unlockProfileDialog").close());
+  $("#unlockProfileForm").addEventListener("submit", unlockProfileFromForm);
+  $("#closePublishProfile").addEventListener("click", () => $("#publishProfileDialog").close());
+  $("#publishProfileForm").addEventListener("submit", publishLegacyProfileFromForm);
+
+  $("#closeProfileSettings").addEventListener("click", () => $("#profileSettingsDialog").close());
+  $("#profileSettingsForm").addEventListener("submit", saveProfileSettings);
+  $("#editProfileColors").addEventListener("change", event => {
+    if (event.target.matches('input[name="editProfileColor"]')) selectedEditProfileColor = event.target.value;
+  });
+  $("#lockProfileOnDeviceBtn").addEventListener("click", lockCurrentProfileOnDevice);
+  $("#deleteProfileBtn").addEventListener("click", deleteCurrentProfile);
+
+  $("#copyChatSetupPromptBtn").addEventListener("click", copyChatSetupPrompt);
+  $("#copyConversionPromptBtn").addEventListener("click", copyConversionPrompt);
+  $("#openChatGptBtn").addEventListener("click", () => window.open("https://chatgpt.com/", "_blank", "noopener,noreferrer"));
+  $("#shareAppBtn").addEventListener("click", shareApplication);
+  $("#onboardingCopyPromptBtn").addEventListener("click", async () => {
+    await copyChatSetupPrompt();
+    $("#chatOnboardingDialog").close();
+    showView("dataView");
+  });
+  $("#onboardingLaterBtn").addEventListener("click", () => $("#chatOnboardingDialog").close());
+  $("#closeChatOnboarding").addEventListener("click", () => $("#chatOnboardingDialog").close());
+
+  window.addEventListener("online", () => refreshGlobalProfiles({ silent: true }));
+  const appearance = window.matchMedia?.("(prefers-color-scheme: dark)");
+  appearance?.addEventListener?.("change", () => activeProfile && applyProfileTheme());
+}
+
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {

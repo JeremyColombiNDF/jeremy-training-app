@@ -2,7 +2,7 @@
 
 ## 1. Créer ou choisir un profil
 
-À chaque lancement, Série affiche les profils enregistrés sur l’appareil.
+À chaque lancement, Série récupère la liste commune des profils synchronisés.
 
 Pour un nouveau profil :
 
@@ -55,9 +55,7 @@ Appuyer ensuite sur `Copier le bilan pour ChatGPT`, puis coller le rapport dans 
 
 ## 6. Utiliser le même profil sur plusieurs appareils
 
-Dans `Données > Profil`, choisir `Copier le lien pour un autre appareil` puis ouvrir ce lien sur le second appareil.
-
-Ce lien contient la clé du profil. Il ne doit pas être publié.
+Le profil apparaît automatiquement dans la liste commune. Sur un nouvel appareil, sélectionner le profil et saisir son code à 4 chiffres une seule fois. Le code administrateur peut également être utilisé.
 
 ## 7. Inviter un ami
 

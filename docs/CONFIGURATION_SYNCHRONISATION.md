@@ -1,6 +1,6 @@
-# Synchronisation multi-profils avec Cloudflare D1
+# Synchronisation globale des profils avec Cloudflare D1
 
-## Configuration requise
+## 1. Liaison D1
 
 Le projet Cloudflare Pages doit posséder une liaison D1 nommée exactement :
 
@@ -8,56 +8,79 @@ Le projet Cloudflare Pages doit posséder une liaison D1 nommée exactement :
 DB
 ```
 
-Si cette liaison existait déjà dans la version précédente, elle peut être conservée telle quelle. La version 1.0 crée automatiquement la nouvelle table `profile_state` dans la même base.
+La base existante peut être conservée. Série 1.1 crée automatiquement les tables `shared_profiles` et `profile_sessions` au premier appel.
 
-## Créer une base D1
+Les scripts SQL de référence se trouvent dans `migrations/`. Leur exécution manuelle n’est pas nécessaire dans le fonctionnement normal.
 
-Dans Cloudflare :
+## 2. Code administrateur
 
-1. ouvrir `Storage & databases` puis `D1` ;
-2. créer une base, par exemple `serie-sync` ;
-3. ouvrir le projet Pages ;
-4. aller dans `Settings` puis `Bindings` ;
-5. ajouter une liaison de type `D1 database` ;
-6. saisir `DB` comme nom de variable ;
-7. sélectionner la base ;
-8. enregistrer et relancer un déploiement.
+Ajouter un secret serveur au projet Pages :
 
-Les scripts SQL de référence se trouvent dans `migrations/`. Il n’est pas nécessaire de les exécuter manuellement : la fonction Pages crée la table au premier appel.
+```text
+Nom : ADMIN_PIN
+Valeur : votre code administrateur
+```
 
-## Fonctionnement par profil
+Ce secret doit être défini dans l’environnement de production utilisé par le site. Relancer ensuite un déploiement.
 
-Chaque profil possède :
+Le code n’est jamais envoyé au navigateur et ne doit pas être ajouté au dépôt GitHub.
 
-- un identifiant aléatoire ;
-- une clé personnelle aléatoire ;
-- un état indépendant dans D1 ;
-- une révision indépendante pour détecter les conflits.
+## 3. Fonctionnement
 
-La clé n’est jamais stockée en clair dans D1 : seule son empreinte SHA-256 est enregistrée.
+La base contient deux niveaux :
 
-## Utiliser un profil sur un autre appareil
+### Répertoire commun
 
-Dans `Données > Profil` :
+Pour chaque profil :
 
-1. choisir `Copier le lien pour un autre appareil` ;
-2. envoyer ou ouvrir ce lien sur l’autre appareil ;
-3. le profil est ajouté puis récupéré depuis D1.
+- identifiant ;
+- nom ;
+- couleur ;
+- date de dernière mise à jour.
 
-Le lien contient la clé du profil dans son fragment d’URL. Il doit être traité comme une clé d’accès : toute personne qui le possède peut lire et modifier ce profil.
+Cette partie est visible par tous les utilisateurs du lien de l’application afin que la même liste apparaisse partout.
 
-## Inviter un ami sans partager son profil
+### Données du profil
 
-Utiliser `Données > Inviter un ami > Partager Série`. Ce bouton partage uniquement l’adresse publique de l’application. L’ami crée ensuite son propre profil et sa propre clé.
+- programme actif ;
+- résultats ;
+- pesées ;
+- historique ;
+- records ;
+- bilan hebdomadaire.
 
-## Conflits
+Ces données ne sont chargées qu’après déverrouillage du profil.
 
-Si deux appareils modifient le même profil hors connexion, l’application n’écrase rien silencieusement. Elle propose :
+## 4. Codes et appareil mémorisé
+
+Chaque profil possède un code personnel à 4 chiffres. Le code est demandé lors de la première ouverture sur un nouvel appareil.
+
+Après validation, le serveur délivre un jeton d’appareil mémorisé dans le navigateur. Le code n’est pas conservé localement.
+
+Le code administrateur défini dans `ADMIN_PIN` ouvre également n’importe quel profil.
+
+Conformément au périmètre privé entre amis :
+
+- les tentatives sont illimitées ;
+- aucun blocage temporaire n’est appliqué ;
+- aucun e-mail ni système de récupération n’est requis.
+
+## 5. Conflits
+
+Si deux appareils modifient le même profil hors connexion, l’application conserve le système existant :
 
 - utiliser la version en ligne ;
 - conserver la version de l’appareil ;
 - télécharger une sauvegarde avant de choisir.
 
-## Anciennes données
+## 6. Migration depuis Série 1.0
 
-Lors de la migration depuis la version mono-profil, l’application crée un identifiant stable à partir de l’ancien état. Deux appareils possédant le même état initial retrouvent ainsi le même profil de migration.
+Les anciennes données étaient enregistrées dans `profile_state` avec une clé par appareil.
+
+Lors de la publication d’un ancien profil, Série 1.1 :
+
+1. vérifie l’ancien accès ;
+2. compare la copie locale et l’ancien état distant ;
+3. conserve la version la plus récente ;
+4. crée le profil dans le nouveau répertoire commun ;
+5. attribue le code à 4 chiffres choisi par l’utilisateur.

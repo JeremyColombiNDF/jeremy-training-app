@@ -1,5 +1,6 @@
 const MAX_STATE_BYTES = 1_800_000;
-const PROFILE_ID_RE = /^[a-zA-Z0-9_-]{12,80}$/;
+const PROFILE_ID_RE = /^p_[a-zA-Z0-9_-]{12,80}$/;
+const ALLOWED_COLORS = new Set(["blue", "indigo", "violet", "teal", "green", "orange", "pink", "red"]);
 
 function json(data, init = {}) {
   const headers = new Headers(init.headers || {});
@@ -14,31 +15,43 @@ async function ensureDatabase(env) {
     error.code = "DB_NOT_CONFIGURED";
     throw error;
   }
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS profile_state (
-      profile_id TEXT PRIMARY KEY,
-      access_hash TEXT NOT NULL,
-      state_json TEXT NOT NULL,
-      revision INTEGER NOT NULL DEFAULT 1,
-      updated_at TEXT NOT NULL,
-      device_id TEXT,
-      client_updated_at TEXT
-    )
-  `).run();
+  await env.DB.batch([
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS shared_profiles (
+        profile_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL,
+        pin_hash TEXT NOT NULL,
+        pin_salt TEXT NOT NULL,
+        state_json TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        device_id TEXT,
+        client_updated_at TEXT
+      )
+    `),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS profile_sessions (
+        session_hash TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT NOT NULL
+      )
+    `),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_profile_sessions_profile ON profile_sessions(profile_id)`)
+  ]);
 }
 
-function readCredentials(request) {
-  const url = new URL(request.url);
-  const profileId = String(url.searchParams.get("profile_id") || "").trim();
-  const authorization = request.headers.get("authorization") || "";
-  const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-  if (!PROFILE_ID_RE.test(profileId) || token.length < 24 || token.length > 200) {
-    const error = new Error("Profil ou clé de synchronisation invalide.");
-    error.code = "PROFILE_CREDENTIALS_REQUIRED";
-    error.status = 401;
+function readProfileId(request) {
+  const profileId = String(new URL(request.url).searchParams.get("profile_id") || "").trim();
+  if (!PROFILE_ID_RE.test(profileId)) {
+    const error = new Error("Identifiant de profil invalide.");
+    error.code = "INVALID_PROFILE_ID";
+    error.status = 400;
     throw error;
   }
-  return { profileId, token };
+  return profileId;
 }
 
 async function sha256Hex(value) {
@@ -47,10 +60,34 @@ async function sha256Hex(value) {
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function authorizeSession(env, request, profileId) {
+  const authorization = request.headers.get("authorization") || "";
+  const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  if (token.length < 24) {
+    const error = new Error("Ce profil doit être déverrouillé sur cet appareil.");
+    error.code = "PROFILE_SESSION_REQUIRED";
+    error.status = 401;
+    throw error;
+  }
+  const sessionHash = await sha256Hex(token);
+  const row = await env.DB.prepare(`
+    SELECT profile_id FROM profile_sessions WHERE session_hash = ? AND profile_id = ?
+  `).bind(sessionHash, profileId).first();
+  if (!row) {
+    const error = new Error("L'accès mémorisé à ce profil n'est plus valide.");
+    error.code = "PROFILE_SESSION_INVALID";
+    error.status = 403;
+    throw error;
+  }
+  env.DB.prepare("UPDATE profile_sessions SET last_used_at = ? WHERE session_hash = ?")
+    .bind(new Date().toISOString(), sessionHash).run().catch(() => {});
+}
+
 async function readRemote(env, profileId) {
-  return env.DB.prepare(
-    "SELECT access_hash, state_json, revision, updated_at, device_id, client_updated_at FROM profile_state WHERE profile_id = ?"
-  ).bind(profileId).first();
+  return env.DB.prepare(`
+    SELECT profile_id, name, color, state_json, revision, updated_at, created_at, device_id, client_updated_at
+    FROM shared_profiles WHERE profile_id = ?
+  `).bind(profileId).first();
 }
 
 function rowPayload(row) {
@@ -62,19 +99,16 @@ function rowPayload(row) {
     updated_at: row.updated_at,
     device_id: row.device_id || "",
     client_updated_at: row.client_updated_at || "",
+    profile: { id: row.profile_id, name: row.name, color: row.color, updated_at: row.updated_at, created_at: row.created_at },
     state: JSON.parse(row.state_json)
   };
 }
 
-async function authorizeExisting(row, token) {
-  if (!row) return;
-  const tokenHash = await sha256Hex(token);
-  if (tokenHash !== row.access_hash) {
-    const error = new Error("La clé de ce profil n'est pas valide.");
-    error.code = "PROFILE_ACCESS_DENIED";
-    error.status = 403;
-    throw error;
-  }
+function sanitizeProfileMeta(state, row) {
+  const name = String(state?.profile?.name || row.name || "Profil").trim().replace(/\s+/g, " ").slice(0, 32) || row.name;
+  const requestedColor = String(state?.profile?.color || row.color || "blue");
+  const color = ALLOWED_COLORS.has(requestedColor) ? requestedColor : row.color;
+  return { name, color };
 }
 
 function errorResponse(error, fallbackCode) {
@@ -85,9 +119,10 @@ function errorResponse(error, fallbackCode) {
 export async function onRequestGet({ request, env }) {
   try {
     await ensureDatabase(env);
-    const { profileId, token } = readCredentials(request);
+    const profileId = readProfileId(request);
+    await authorizeSession(env, request, profileId);
     const row = await readRemote(env, profileId);
-    await authorizeExisting(row, token);
+    if (!row) return json({ error: "PROFILE_NOT_FOUND", message: "Ce profil n'existe plus." }, { status: 404 });
     return json(rowPayload(row));
   } catch (error) {
     return errorResponse(error, "SYNC_READ_FAILED");
@@ -97,7 +132,8 @@ export async function onRequestGet({ request, env }) {
 export async function onRequestPut({ request, env }) {
   try {
     await ensureDatabase(env);
-    const { profileId, token } = readCredentials(request);
+    const profileId = readProfileId(request);
+    await authorizeSession(env, request, profileId);
     const contentLength = Number(request.headers.get("content-length") || 0);
     if (contentLength > MAX_STATE_BYTES) return json({ error: "STATE_TOO_LARGE" }, { status: 413 });
 
@@ -105,69 +141,39 @@ export async function onRequestPut({ request, env }) {
     if (!body || typeof body !== "object" || !body.state?.week || !Array.isArray(body.state.week.sessions)) {
       return json({ error: "INVALID_STATE", message: "État d'application invalide." }, { status: 400 });
     }
-
     const stateJson = JSON.stringify(body.state);
     if (new TextEncoder().encode(stateJson).byteLength > MAX_STATE_BYTES) {
       return json({ error: "STATE_TOO_LARGE" }, { status: 413 });
     }
 
-    const baseRevision = Number(body.base_revision || 0);
-    const deviceId = String(body.device_id || "").slice(0, 100);
-    const clientUpdatedAt = String(body.client_updated_at || body.state.updated_at || "").slice(0, 64);
-    const now = new Date().toISOString();
     const existing = await readRemote(env, profileId);
-    await authorizeExisting(existing, token);
-
-    if (!existing) {
-      if (baseRevision !== 0) {
-        return json({ error: "SYNC_CONFLICT", ...rowPayload(null) }, { status: 409 });
-      }
-      const accessHash = await sha256Hex(token);
-      const inserted = await env.DB.prepare(`
-        INSERT OR IGNORE INTO profile_state (profile_id, access_hash, state_json, revision, updated_at, device_id, client_updated_at)
-        VALUES (?, ?, ?, 1, ?, ?, ?)
-      `).bind(profileId, accessHash, stateJson, now, deviceId, clientUpdatedAt).run();
-      if (!inserted.meta?.changes) {
-        const latest = await readRemote(env, profileId);
-        await authorizeExisting(latest, token);
-        return json({ error: "SYNC_CONFLICT", ...rowPayload(latest) }, { status: 409 });
-      }
-      return json({ ok: true, revision: 1, updated_at: now });
-    }
-
+    if (!existing) return json({ error: "PROFILE_NOT_FOUND", message: "Ce profil n'existe plus." }, { status: 404 });
+    const baseRevision = Number(body.base_revision || 0);
     if (Number(existing.revision) !== baseRevision) {
       return json({ error: "SYNC_CONFLICT", ...rowPayload(existing) }, { status: 409 });
     }
 
     const nextRevision = baseRevision + 1;
+    const now = new Date().toISOString();
+    const meta = sanitizeProfileMeta(body.state, existing);
     const updated = await env.DB.prepare(`
-      UPDATE profile_state
-      SET state_json = ?, revision = ?, updated_at = ?, device_id = ?, client_updated_at = ?
+      UPDATE shared_profiles
+      SET state_json = ?, revision = ?, updated_at = ?, device_id = ?, client_updated_at = ?, name = ?, color = ?
       WHERE profile_id = ? AND revision = ?
-    `).bind(stateJson, nextRevision, now, deviceId, clientUpdatedAt, profileId, baseRevision).run();
+    `).bind(
+      stateJson, nextRevision, now,
+      String(body.device_id || "").slice(0, 100),
+      String(body.client_updated_at || body.state.updated_at || "").slice(0, 64),
+      meta.name, meta.color, profileId, baseRevision
+    ).run();
 
     if (!updated.meta?.changes) {
       const latest = await readRemote(env, profileId);
-      await authorizeExisting(latest, token);
       return json({ error: "SYNC_CONFLICT", ...rowPayload(latest) }, { status: 409 });
     }
-
-    return json({ ok: true, revision: nextRevision, updated_at: now });
+    return json({ ok: true, revision: nextRevision, updated_at: now, profile: { id: profileId, name: meta.name, color: meta.color } });
   } catch (error) {
     return errorResponse(error, "SYNC_WRITE_FAILED");
-  }
-}
-
-export async function onRequestDelete({ request, env }) {
-  try {
-    await ensureDatabase(env);
-    const { profileId, token } = readCredentials(request);
-    const existing = await readRemote(env, profileId);
-    await authorizeExisting(existing, token);
-    if (existing) await env.DB.prepare("DELETE FROM profile_state WHERE profile_id = ?").bind(profileId).run();
-    return json({ ok: true });
-  } catch (error) {
-    return errorResponse(error, "SYNC_DELETE_FAILED");
   }
 }
 

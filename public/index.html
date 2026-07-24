@@ -29,15 +29,19 @@
       </div>
       <div id="profileGatePanel" class="profile-gate-panel">
         <div class="profile-gate-title-row">
-          <div><h2 id="profileGateTitle">Choisir un profil</h2><p id="profileGateSubtitle">Chaque profil garde son programme, son historique et sa couleur.</p></div>
+          <div><h2 id="profileGateTitle">Choisir un profil</h2><p id="profileGateSubtitle">Tous les profils synchronisés apparaissent ici.</p></div>
+          <button id="refreshProfilesGate" class="profile-refresh-button" type="button" aria-label="Actualiser les profils" title="Actualiser les profils">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg>
+          </button>
         </div>
         <div id="profileGateList" class="profile-gate-list"></div>
         <button id="createProfileFromGate" class="profile-create-button" type="button">
           <span class="profile-create-icon">+</span>
           <span><strong>Créer un profil</strong><small>Deux minutes, aucun compte requis</small></span>
         </button>
+        <p id="profileDirectoryStatus" class="profile-directory-status">Connexion à la liste commune…</p>
       </div>
-      <p class="profile-gate-footnote">Les données sont séparées par profil et peuvent être synchronisées entre appareils.</p>
+      <p class="profile-gate-footnote">Un profil créé et synchronisé apparaît automatiquement sur tous les appareils. Son code à 4 chiffres est demandé uniquement lors de la première ouverture.</p>
     </div>
   </section>
 
@@ -261,7 +265,7 @@
         <button id="backupBtn" class="settings-row list-button" type="button"><span>Télécharger une sauvegarde</span><svg class="row-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
         <label class="settings-row list-button file-row"><span>Restaurer une sauvegarde</span><svg class="row-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg><input id="restoreInput" type="file" accept="application/json,.json"></label>
       </article>
-      <p class="version-label">Série · Version 1.0</p>
+      <p class="version-label">Série · Version 1.1.0</p>
     </section>
   </main>
 
@@ -285,8 +289,13 @@
   <dialog id="createProfileDialog" class="app-dialog sheet-dialog profile-form-dialog">
     <form method="dialog" id="createProfileForm">
       <div class="dialog-handle"></div>
-      <div class="dialog-head"><div><h3>Créer un profil</h3><p>Un prénom et une couleur suffisent.</p></div><button id="closeCreateProfile" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
+      <div class="dialog-head"><div><h3>Créer un profil</h3><p>Il sera visible sur tous les appareils.</p></div><button id="closeCreateProfile" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
       <label class="profile-name-field"><span>Prénom ou pseudo</span><input id="newProfileName" type="text" maxlength="32" autocomplete="nickname" placeholder="Thomas" required></label>
+      <div class="pin-fields-grid">
+        <label class="profile-name-field"><span>Code à 4 chiffres</span><input id="newProfilePin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="••••" required></label>
+        <label class="profile-name-field"><span>Confirmer</span><input id="newProfilePinConfirm" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="••••" required></label>
+      </div>
+      <p class="pin-help">Ce code sert uniquement à ouvrir le profil pour la première fois sur un nouvel appareil.</p>
       <fieldset class="profile-color-fieldset"><legend>Couleur principale</legend><div id="newProfileColors" class="profile-color-grid"></div></fieldset>
       <div class="profile-preview-card"><span id="newProfilePreviewAvatar" class="profile-preview-avatar">T</span><div><strong id="newProfilePreviewName">Ton profil</strong><small>Ton programme et tes données seront séparés.</small></div></div>
       <button class="primary-button full-button" type="submit">Créer le profil</button>
@@ -295,24 +304,56 @@
 
   <dialog id="profileSwitcherDialog" class="app-dialog sheet-dialog">
     <div class="dialog-handle"></div>
-    <div class="dialog-head"><div><h3>Profils</h3><p>Choisis les données à ouvrir sur cet appareil.</p></div><button id="closeProfileSwitcher" class="close-dialog" type="button" aria-label="Fermer">×</button></div>
+    <div class="dialog-head"><div><h3>Profils</h3><p>Liste commune synchronisée entre tous les appareils.</p></div><button id="closeProfileSwitcher" class="close-dialog" type="button" aria-label="Fermer">×</button></div>
     <div id="profileSwitcherList" class="profile-switcher-list"></div>
-    <button id="addProfileFromSwitcher" class="secondary-button full-button" type="button">Ajouter un profil</button>
+    <button id="refreshProfilesSwitcher" class="secondary-button full-button" type="button">Actualiser la liste</button>
+    <button id="addProfileFromSwitcher" class="secondary-button full-button" type="button">Créer un nouveau profil</button>
     <button id="manageCurrentProfileBtn" class="text-button full-button" type="button">Gérer le profil actuel</button>
+  </dialog>
+
+  <dialog id="unlockProfileDialog" class="app-dialog sheet-dialog profile-form-dialog">
+    <form method="dialog" id="unlockProfileForm">
+      <div class="dialog-handle"></div>
+      <div class="dialog-head"><div><h3 id="unlockProfileTitle">Ouvrir le profil</h3><p>Code demandé une seule fois sur cet appareil.</p></div><button id="closeUnlockProfile" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
+      <div id="unlockProfilePreview" class="profile-preview-card"></div>
+      <label class="profile-name-field pin-single-field"><span>Code à 4 chiffres</span><input id="unlockProfilePin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="one-time-code" placeholder="••••" required></label>
+      <p class="pin-help">Le code personnel du profil ou le code administrateur peut être utilisé.</p>
+      <button id="unlockProfileSubmit" class="primary-button full-button" type="submit">Ouvrir le profil</button>
+    </form>
+  </dialog>
+
+  <dialog id="publishProfileDialog" class="app-dialog sheet-dialog profile-form-dialog">
+    <form method="dialog" id="publishProfileForm">
+      <div class="dialog-handle"></div>
+      <div class="dialog-head"><div><h3>Publier ce profil</h3><p>Dernière étape de migration vers la liste commune.</p></div><button id="closePublishProfile" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
+      <div id="publishProfilePreview" class="profile-preview-card"></div>
+      <div class="pin-fields-grid">
+        <label class="profile-name-field"><span>Nouveau code</span><input id="publishProfilePin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="••••" required></label>
+        <label class="profile-name-field"><span>Confirmer</span><input id="publishProfilePinConfirm" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="••••" required></label>
+      </div>
+      <p class="pin-help">Le programme, les pesées et l’historique présents sur cet appareil seront conservés.</p>
+      <button id="publishProfileSubmit" class="primary-button full-button" type="submit">Publier et synchroniser</button>
+    </form>
   </dialog>
 
   <dialog id="profileSettingsDialog" class="app-dialog sheet-dialog profile-form-dialog">
     <form method="dialog" id="profileSettingsForm">
       <div class="dialog-handle"></div>
-      <div class="dialog-head"><div><h3>Mon profil</h3><p>Identité visuelle et accès entre appareils.</p></div><button id="closeProfileSettings" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
+      <div class="dialog-head"><div><h3>Mon profil</h3><p>Identité, couleur et accès sur cet appareil.</p></div><button id="closeProfileSettings" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
       <label class="profile-name-field"><span>Prénom ou pseudo</span><input id="editProfileName" type="text" maxlength="32" autocomplete="nickname" required></label>
       <fieldset class="profile-color-fieldset"><legend>Couleur principale</legend><div id="editProfileColors" class="profile-color-grid"></div></fieldset>
+      <label class="profile-name-field"><span>Nouveau code <small>(facultatif)</small></span><input id="editProfilePin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="Laisser vide pour conserver"></label>
       <button class="primary-button full-button" type="submit">Enregistrer</button>
       <div class="profile-access-group">
-        <button id="copyProfileLinkBtn" class="list-action" type="button">Copier le lien pour un autre appareil</button>
-        <p>Le lien contient la clé du profil. Toute personne qui le possède peut accéder à ces données.</p>
+        <p>Ce profil apparaît automatiquement sur tous les appareils. Son code est seulement demandé lors de sa première ouverture.</p>
+        <p id="profileTechnicalId" class="profile-technical-id"></p>
       </div>
-      <button id="deleteProfileBtn" class="danger-text-button full-button" type="button">Supprimer ce profil</button>
+      <button id="lockProfileOnDeviceBtn" class="secondary-button full-button" type="button">Verrouiller sur cet appareil</button>
+      <details class="profile-danger-zone">
+        <summary>Suppression définitive</summary>
+        <p>Cette action supprime aussi la version en ligne et déconnecte tous les appareils.</p>
+        <button id="deleteProfileBtn" class="danger-text-button full-button" type="button">Supprimer partout</button>
+      </details>
     </form>
   </dialog>
 
