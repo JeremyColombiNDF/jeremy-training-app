@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <meta name="description" content="Carnet d'entraînement personnel de Jérémy">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <title>Coach Jérémy</title>
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">COACH JÉRÉMY</p>
+      <h1 id="pageTitle">Ma semaine</h1>
+    </div>
+    <button id="installBtn" class="icon-button hidden" type="button" aria-label="Installer l'application">＋</button>
+  </header>
+
+  <main id="app" class="app-shell">
+    <section id="weekView" class="view active" aria-labelledby="pageTitle">
+      <article class="hero-card">
+        <div class="hero-topline">
+          <div>
+            <span class="pill" id="blockLabel">Bloc actuel</span>
+            <h2 id="weekTitle">Semaine 1</h2>
+            <p id="weekObjective" class="muted">Chargement du programme...</p>
+          </div>
+          <div class="progress-ring" id="progressRing" aria-label="Progression de la semaine">
+            <span id="progressValue">0%</span>
+          </div>
+        </div>
+        <div class="week-stats">
+          <div><strong id="doneSessions">0</strong><span>séances faites</span></div>
+          <div><strong id="weekWeight">—</strong><span>poids moyen</span></div>
+          <div><strong id="weekRpe">—</strong><span>RPE moyen</span></div>
+        </div>
+      </article>
+
+      <section class="quick-weight card">
+        <div>
+          <p class="section-kicker">PESÉE DU JOUR</p>
+          <h3>Ton poids du matin</h3>
+          <p class="muted small">Une seule saisie, réutilisée dans la séance du jour.</p>
+        </div>
+        <label class="number-field weight-field">
+          <input id="dailyWeight" type="number" min="40" max="150" step="0.1" inputmode="decimal" placeholder="77.5">
+          <span>kg</span>
+        </label>
+      </section>
+
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">PROGRAMME</p>
+          <h2>Les séances</h2>
+        </div>
+        <button id="resetDemoBtn" class="text-button" type="button">Réinitialiser</button>
+      </div>
+      <div id="sessionList" class="session-list"></div>
+    </section>
+
+    <section id="sessionView" class="view" aria-labelledby="sessionTitle">
+      <button id="backToWeek" class="back-button" type="button">← Semaine</button>
+      <article class="session-header-card">
+        <div>
+          <p id="sessionDay" class="section-kicker"></p>
+          <h2 id="sessionTitle">Séance</h2>
+          <p id="sessionGoal" class="muted"></p>
+        </div>
+        <div class="session-meta">
+          <span id="sessionDuration" class="pill soft"></span>
+          <span id="sessionStatusPill" class="pill soft"></span>
+        </div>
+        <div class="session-inputs">
+          <label>
+            <span>Poids du matin</span>
+            <div class="number-field compact">
+              <input id="sessionWeight" type="number" min="40" max="150" step="0.1" inputmode="decimal">
+              <span>kg</span>
+            </div>
+          </label>
+          <label>
+            <span>Énergie avant</span>
+            <select id="sessionEnergy"></select>
+          </label>
+        </div>
+      </article>
+
+      <div id="exerciseList" class="exercise-list"></div>
+
+      <article class="card session-finish-card">
+        <div>
+          <p class="section-kicker">FIN DE SÉANCE</p>
+          <h3>Comment tu te sens ?</h3>
+        </div>
+        <div class="finish-grid">
+          <label>
+            <span>Durée réelle</span>
+            <div class="number-field compact">
+              <input id="actualDuration" type="number" min="10" max="180" step="5" inputmode="numeric">
+              <span>min</span>
+            </div>
+          </label>
+          <label>
+            <span>Difficulté globale</span>
+            <select id="sessionRpe"></select>
+          </label>
+        </div>
+        <label class="textarea-label">
+          <span>Commentaire général</span>
+          <textarea id="sessionComment" rows="3" placeholder="Bonnes sensations, manque de jus, gêne particulière..."></textarea>
+        </label>
+        <button id="completeSessionBtn" class="primary-button" type="button">Terminer la séance</button>
+      </article>
+    </section>
+
+    <section id="reviewView" class="view" aria-labelledby="reviewTitle">
+      <div class="section-heading flush">
+        <div>
+          <p class="section-kicker">CLÔTURE</p>
+          <h2 id="reviewTitle">Bilan de la semaine</h2>
+        </div>
+      </div>
+
+      <article class="card review-card">
+        <div class="review-grid">
+          <label><span>Sommeil</span><select id="reviewSleep"></select></label>
+          <label><span>Énergie générale</span><select id="reviewEnergy"></select></label>
+          <label><span>Faim</span><select id="reviewHunger"></select></label>
+          <label><span>Protéines</span><select id="reviewProtein"></select></label>
+          <label><span>Pas moyens / jour</span><input id="reviewSteps" type="number" min="0" max="40000" step="100" inputmode="numeric"></label>
+          <label><span>Footings / cardio</span><input id="reviewCardio" type="text" placeholder="2 × 5 km, padel..."></label>
+        </div>
+        <label class="textarea-label">
+          <span>Événements particuliers</span>
+          <textarea id="reviewEvents" rows="3" placeholder="Voyage, soirée, sommeil perturbé, semaine chargée..."></textarea>
+        </label>
+        <label class="textarea-label">
+          <span>Impression visuelle et ressenti</span>
+          <textarea id="reviewFeeling" rows="3" placeholder="Plus sec, jambes lourdes, bonne récupération..."></textarea>
+        </label>
+      </article>
+
+      <article class="export-card">
+        <div>
+          <p class="section-kicker light">EXPORT CHATGPT</p>
+          <h3>Ton bilan prêt à analyser</h3>
+          <p>Le texte reprend automatiquement le prévu, le réalisé, les RPE, les problèmes et les pesées.</p>
+        </div>
+        <button id="copyReportBtn" class="light-button" type="button">Copier le bilan</button>
+        <button id="downloadReportBtn" class="ghost-light-button" type="button">Télécharger en .txt</button>
+      </article>
+    </section>
+
+    <section id="dataView" class="view" aria-labelledby="dataTitle">
+      <div class="section-heading flush">
+        <div>
+          <p class="section-kicker">IMPORT & SAUVEGARDE</p>
+          <h2 id="dataTitle">Mes données</h2>
+        </div>
+      </div>
+
+      <article class="card">
+        <h3>Importer la semaine suivante</h3>
+        <p class="muted small">Colle le bloc JSON fourni par ChatGPT, avec ou sans les marqueurs d'import.</p>
+        <textarea id="importText" class="code-area" rows="10" spellcheck="false" placeholder='SPORT_APP_IMPORT_START\n{ "schema_version": "1.0", ... }\nSPORT_APP_IMPORT_END'></textarea>
+        <div class="button-row">
+          <button id="pasteImportBtn" class="secondary-button" type="button">Coller</button>
+          <button id="previewImportBtn" class="primary-button" type="button">Vérifier et importer</button>
+        </div>
+        <div id="importPreview" class="import-preview hidden"></div>
+      </article>
+
+      <article class="card">
+        <h3>Sauvegarder ou restaurer</h3>
+        <p class="muted small">La version 0.1 stocke tout dans ce navigateur. Télécharge une sauvegarde avant de changer de téléphone ou de navigateur.</p>
+        <div class="button-stack">
+          <button id="backupBtn" class="secondary-button" type="button">Télécharger une sauvegarde</button>
+          <label class="file-button">
+            Restaurer une sauvegarde
+            <input id="restoreInput" type="file" accept="application/json,.json">
+          </label>
+        </div>
+      </article>
+
+      <article class="card muted-card">
+        <h3>Version</h3>
+        <p><strong>Coach Jérémy v0.1</strong></p>
+        <p class="small muted">Prototype local : aucune donnée n'est envoyée sur Internet.</p>
+      </article>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Navigation principale">
+    <button class="nav-item active" data-view="weekView" type="button"><span>▦</span><small>Semaine</small></button>
+    <button class="nav-item" data-view="sessionView" type="button"><span>✓</span><small>Séance</small></button>
+    <button class="nav-item" data-view="reviewView" type="button"><span>◎</span><small>Bilan</small></button>
+    <button class="nav-item" data-view="dataView" type="button"><span>⇅</span><small>Données</small></button>
+  </nav>
+
+  <dialog id="confirmDialog" class="app-dialog">
+    <form method="dialog">
+      <h3 id="dialogTitle">Confirmation</h3>
+      <p id="dialogText"></p>
+      <div class="dialog-actions">
+        <button value="cancel" class="secondary-button">Annuler</button>
+        <button id="dialogConfirmBtn" value="confirm" class="danger-button">Confirmer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
