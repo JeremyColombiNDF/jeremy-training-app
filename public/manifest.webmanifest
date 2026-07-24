@@ -1,12 +1,12 @@
 {
   "name": "Coach Jérémy",
-  "short_name": "Coach",
-  "description": "Carnet d'entraînement personnel de Jérémy",
+  "short_name": "Coach Jérémy",
+  "description": "Carnet d'entraînement personnel et export ChatGPT",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#f3f5f8",
-  "theme_color": "#111827",
-  "lang": "fr",
+  "background_color": "#f4f5f7",
+  "theme_color": "#121a2b",
   "icons": [
     {
       "src": "icons/icon.svg",

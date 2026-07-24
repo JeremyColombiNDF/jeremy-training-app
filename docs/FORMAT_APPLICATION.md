@@ -44,6 +44,7 @@ SPORT_APP_IMPORT_END
             "name": "Développé couché",
             "instructions": "Consignes techniques courtes",
             "film_requested": true,
+            "weight_step_kg": 2.5,
             "adaptation_rule": "Réduire la charge si le RPE dépasse la cible",
             "sets": [
               {
@@ -70,5 +71,6 @@ SPORT_APP_IMPORT_END
 - Chaque série est listée individuellement dans `sets`.
 - `reps`, `target_rpe_min`, `target_rpe_max`, `rest_sec` sont des nombres.
 - `film_requested` est un booléen : `true` ou `false`.
+- `weight_step_kg` est facultatif. Il permet de définir le pas des boutons `− / +` pour la charge ; l’application détermine sinon un pas automatiquement.
 - Aucun commentaire ne doit être ajouté dans le JSON.
 - Ne pas utiliser de séries résumées du type `4x8` dans un champ texte à la place du tableau `sets`.

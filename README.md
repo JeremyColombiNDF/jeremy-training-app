@@ -1,20 +1,35 @@
-# Coach Jérémy — v0.1
+# Coach Jérémy — v0.2
 
 Application web mobile de suivi sportif, sans framework et sans serveur.
 
 ## Fonctionnalités
 
-- semaine de cinq séances préchargée ;
-- poids quotidien ;
-- suivi prévu / réalisé série par série ;
-- charge, répétitions et RPE modifiables ;
-- statuts et problèmes d'exécution ;
+- carte automatique de la séance du jour ;
+- reprise immédiate d'une séance en cours ;
+- poids quotidien, moyenne des sept dernières pesées et tendance ;
+- validation rapide d'un exercice conforme ;
+- modification des séries, charges et répétitions avec boutons `− / +` ;
+- RPE de 5 à 10 par paliers de 0,5 ;
+- validation série par série et chronomètre de repos ;
+- signalement guidé des douleurs et problèmes techniques ;
+- statuts manuels : réussi, partiel, échec, remplacé ou non réalisé ;
 - indication des séries filmées ;
-- bilan hebdomadaire ;
-- export texte optimisé pour ChatGPT ;
-- import JSON de la semaine suivante ;
-- sauvegarde / restauration ;
+- progression visible pendant la séance ;
+- bilan hebdomadaire calculé et export optimisé pour ChatGPT ;
+- aperçu du programme avant import ;
+- archivage automatique de la semaine remplacée ;
+- historique consultable et exportable ;
+- sauvegarde / restauration complète ;
 - installation possible en PWA.
+
+## Mise à jour depuis la v0.1
+
+Remplacer les fichiers du dépôt par ceux de cette version, puis effectuer :
+
+1. `Commit to main` dans GitHub Desktop ;
+2. `Push origin`.
+
+Cloudflare Pages republie automatiquement le site. Les données v0.1 déjà présentes dans le navigateur sont migrées vers le format v0.2 au premier chargement.
 
 ## Mise en ligne Cloudflare Pages
 
@@ -33,6 +48,6 @@ python3 -m http.server 8000 --directory public
 
 Puis ouvrir `http://localhost:8000`.
 
-## Important
+## Stockage
 
-Les données de cette version sont conservées dans le navigateur avec `localStorage`. Elles ne sont pas synchronisées entre appareils.
+Les données sont conservées dans le navigateur avec `localStorage`. Elles ne sont pas synchronisées entre appareils. Utiliser régulièrement le bouton de sauvegarde dans `Données`.

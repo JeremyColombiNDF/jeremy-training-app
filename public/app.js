@@ -1,7 +1,9 @@
 "use strict";
 
-const STORAGE_KEY = "coach_jeremy_state_v1";
+const STORAGE_KEY = "coach_jeremy_state_v2";
+const LEGACY_STORAGE_KEY = "coach_jeremy_state_v1";
 const APP_SCHEMA = "1.0";
+const APP_VERSION = "0.2";
 
 const STATUS_LABELS = {
   planned: "À faire",
@@ -18,16 +20,29 @@ const EXERCISE_STATUSES = [
   ["skipped", "Non réalisé"]
 ];
 
+const FINISHED_EXERCISE_STATUSES = new Set(["success", "partial", "failed", "replaced", "skipped"]);
+
 const ISSUE_OPTIONS = [
-  ["too_heavy", "Trop lourd"],
+  ["too_heavy", "Charge trop lourde"],
+  ["technique", "Problème technique"],
   ["pain", "Douleur / gêne"],
-  ["technique", "Technique"],
-  ["fatigue", "Fatigue"],
-  ["equipment", "Matériel"],
+  ["fatigue", "Fatigue générale"],
   ["time", "Manque de temps"],
-  ["feeling", "Mauvais ressenti"]
+  ["equipment", "Matériel indisponible"],
+  ["replaced", "Exercice remplacé"],
+  ["other", "Autre"]
 ];
 
+const TECHNIQUE_OPTIONS = [
+  ["instability", "Instabilité"],
+  ["range", "Amplitude"],
+  ["trajectory", "Trajectoire"],
+  ["bracing", "Perte de gainage"],
+  ["tempo", "Tempo non respecté"],
+  ["coordination", "Coordination"]
+];
+
+const DAY_NAMES = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 const DEMO_PROGRAM = {
   schema_version: APP_SCHEMA,
   athlete_profile: {
@@ -184,57 +199,99 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function makeInitialState(program = DEMO_PROGRAM) {
+function emptyWeeklyReview() {
+  return { sleep: "", energy: "", hunger: "", protein: "", steps: "", cardio: "", events: "", feeling: "" };
+}
+
+function makeInitialState(program = DEMO_PROGRAM, history = []) {
   const base = clone(program);
   return {
+    app_version: APP_VERSION,
     schema_version: APP_SCHEMA,
     athlete_profile: base.athlete_profile || clone(DEMO_PROGRAM.athlete_profile),
     week: base.week,
     daily_weights: {},
     session_results: {},
-    weekly_review: {
-      sleep: "",
-      energy: "",
-      hunger: "",
-      protein: "",
-      steps: "",
-      cardio: "",
-      events: "",
-      feeling: ""
-    },
+    weekly_review: emptyWeeklyReview(),
+    history: clone(history || []),
     updated_at: new Date().toISOString()
   };
 }
 
 let state = loadState();
-let currentSessionId = state.week.sessions[0]?.id || null;
+let currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+let activeExerciseId = null;
+let currentViewId = "weekView";
 let deferredInstallPrompt = null;
+let pendingImport = null;
+let issueContext = null;
+let timerRemaining = 0;
+let timerRunning = false;
+let timerInterval = null;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return makeInitialState();
     const parsed = JSON.parse(raw);
     if (!parsed.week?.sessions) throw new Error("État invalide");
-    return parsed;
+    return migrateState(parsed);
   } catch (error) {
     console.warn("Impossible de charger les données locales", error);
     return makeInitialState();
   }
 }
 
-function saveState() {
-  state.updated_at = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  renderSummary();
+function migrateState(parsed) {
+  const migrated = {
+    ...parsed,
+    app_version: APP_VERSION,
+    schema_version: parsed.schema_version || APP_SCHEMA,
+    daily_weights: parsed.daily_weights || {},
+    session_results: parsed.session_results || {},
+    weekly_review: { ...emptyWeeklyReview(), ...(parsed.weekly_review || {}) },
+    history: Array.isArray(parsed.history) ? parsed.history : []
+  };
+  migrated.week.sessions.forEach(session => {
+    const sr = migrated.session_results[session.id];
+    if (!sr) return;
+    sr.exercises = sr.exercises || {};
+    session.exercises.forEach(exerciseData => {
+      const er = sr.exercises[exerciseData.id];
+      if (!er) return;
+      er.issues = er.issues || [];
+      er.technique_flags = er.technique_flags || [];
+      er.pain = er.pain || { area: "", intensity: "", continued: false };
+      er.overall_rpe = er.overall_rpe || "";
+      er.show_sets = Boolean(er.show_sets);
+      er.sets = (er.sets || []).map((setData, index) => ({
+        weight_kg: setData.weight_kg ?? exerciseData.sets[index]?.weight_kg ?? "",
+        reps: setData.reps ?? exerciseData.sets[index]?.reps ?? "",
+        rpe: setData.rpe ?? "",
+        completed: typeof setData.completed === "boolean" ? setData.completed : FINISHED_EXERCISE_STATUSES.has(er.status)
+      }));
+    });
+  });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+  return migrated;
 }
 
-function sessionResult(sessionId) {
-  if (!state.session_results[sessionId]) {
-    state.session_results[sessionId] = {
+function saveState({ render = false } = {}) {
+  state.updated_at = new Date().toISOString();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (render) renderCurrentView();
+  else {
+    renderSummary();
+    updateResumeButton();
+  }
+}
+
+function sessionResult(sessionId, targetState = state) {
+  if (!targetState.session_results[sessionId]) {
+    targetState.session_results[sessionId] = {
       status: "planned",
       weight_kg: "",
       energy_before: "",
@@ -244,114 +301,114 @@ function sessionResult(sessionId) {
       exercises: {}
     };
   }
-  return state.session_results[sessionId];
+  return targetState.session_results[sessionId];
 }
 
-function exerciseResult(sessionId, exerciseData) {
-  const session = sessionResult(sessionId);
+function exerciseResult(sessionId, exerciseData, targetState = state) {
+  const session = sessionResult(sessionId, targetState);
   if (!session.exercises[exerciseData.id]) {
     session.exercises[exerciseData.id] = {
       status: "planned",
       issues: [],
+      technique_flags: [],
+      pain: { area: "", intensity: "", continued: false },
       filmed: false,
       note: "",
+      overall_rpe: "",
+      show_sets: false,
       sets: exerciseData.sets.map(planned => ({
         weight_kg: planned.weight_kg,
         reps: planned.reps,
-        rpe: ""
+        rpe: "",
+        completed: false
       }))
     };
   }
   return session.exercises[exerciseData.id];
 }
 
-function initSelect(select, values, placeholder = "Choisir") {
-  select.innerHTML = `<option value="">${placeholder}</option>` + values.map(value => `<option value="${value}">${value}/10</option>`).join("");
-}
-
 function init() {
-  initSelect($("#sessionEnergy"), range(1, 10));
-  initSelect($("#sessionRpe"), halfRange(5, 10));
-  initSelect($("#reviewSleep"), range(1, 10));
-  initSelect($("#reviewEnergy"), range(1, 10));
-  initSelect($("#reviewHunger"), range(1, 10));
-  $("#reviewProtein").innerHTML = '<option value="">Choisir</option>' + [1,2,3,4,5,6,7].map(v => `<option value="${v}">${v}/7 jours</option>`).join("");
-
   bindStaticEvents();
   hydrateReview();
   renderWeek();
   renderSession(currentSessionId);
+  renderHistory();
+  renderReviewSummary();
+  updateResumeButton();
   registerServiceWorker();
 }
 
-function range(min, max) {
-  return Array.from({ length: max - min + 1 }, (_, i) => min + i);
-}
-
-function halfRange(min, max) {
-  const values = [];
-  for (let n = min; n <= max; n += 0.5) values.push(n);
-  return values;
-}
-
 function bindStaticEvents() {
-  $$(".nav-item").forEach(button => button.addEventListener("click", () => {
-    const view = button.dataset.view;
-    if (view === "sessionView" && !currentSessionId) currentSessionId = state.week.sessions[0]?.id;
-    showView(view);
-    if (view === "sessionView") renderSession(currentSessionId);
-    if (view === "reviewView") hydrateReview();
-  }));
-
+  $$(".nav-item").forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
   $("#backToWeek").addEventListener("click", () => showView("weekView"));
+
   $("#dailyWeight").addEventListener("change", event => {
-    const key = todayKey();
-    state.daily_weights[key] = numberOrBlank(event.target.value);
-    const active = currentSessionId ? sessionResult(currentSessionId) : null;
-    if (active && !active.weight_kg) active.weight_kg = numberOrBlank(event.target.value);
+    const value = numberOrBlank(event.target.value);
+    if (value === "") delete state.daily_weights[todayKey()];
+    else state.daily_weights[todayKey()] = value;
+    const todaySession = findTodaySession();
+    if (todaySession && value !== "" && !sessionResult(todaySession.id).weight_kg) sessionResult(todaySession.id).weight_kg = value;
     saveState();
+    renderWeightTrend();
   });
 
   $("#sessionWeight").addEventListener("change", event => {
     const result = sessionResult(currentSessionId);
     result.weight_kg = numberOrBlank(event.target.value);
-    if (result.weight_kg) state.daily_weights[todayKey()] = result.weight_kg;
+    if (result.weight_kg !== "") state.daily_weights[todayKey()] = result.weight_kg;
     saveState();
+    renderWeightTrend();
   });
-  $("#sessionEnergy").addEventListener("change", event => updateSessionField("energy_before", event.target.value));
   $("#actualDuration").addEventListener("change", event => updateSessionField("actual_duration_min", numberOrBlank(event.target.value)));
-  $("#sessionRpe").addEventListener("change", event => updateSessionField("global_rpe", numberOrBlank(event.target.value)));
-  $("#sessionComment").addEventListener("input", debounce(event => updateSessionField("comment", event.target.value), 300));
+  $("#sessionComment").addEventListener("input", debounce(event => updateSessionField("comment", event.target.value), 250));
   $("#completeSessionBtn").addEventListener("click", completeCurrentSession);
 
-  ["Sleep", "Energy", "Hunger", "Protein", "Steps", "Cardio", "Events", "Feeling"].forEach(name => {
+  ["Steps", "Cardio", "Events", "Feeling"].forEach(name => {
     const element = $(`#review${name}`);
     const key = name.toLowerCase();
     element.addEventListener(element.tagName === "TEXTAREA" || element.type === "text" ? "input" : "change", debounce(event => {
       state.weekly_review[key] = event.target.value;
       saveState();
+      refreshReportPreview();
     }, 250));
   });
 
   $("#copyReportBtn").addEventListener("click", copyReport);
   $("#downloadReportBtn").addEventListener("click", downloadReport);
   $("#pasteImportBtn").addEventListener("click", pasteImport);
-  $("#previewImportBtn").addEventListener("click", importProgram);
+  $("#previewImportBtn").addEventListener("click", previewImport);
   $("#backupBtn").addEventListener("click", downloadBackup);
   $("#restoreInput").addEventListener("change", restoreBackup);
   $("#resetDemoBtn").addEventListener("click", () => confirmAction(
-    "Réinitialiser la démonstration ?",
-    "Toutes les saisies enregistrées dans ce navigateur seront supprimées.",
+    "Tout réinitialiser ?",
+    "La semaine actuelle, les saisies et l’historique local seront supprimés.",
     () => {
       state = makeInitialState();
-      currentSessionId = state.week.sessions[0]?.id || null;
+      currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+      activeExerciseId = null;
+      pendingImport = null;
       saveState();
       hydrateReview();
-      renderWeek();
-      renderSession(currentSessionId);
-      toast("Démonstration réinitialisée");
+      renderAll();
+      toast("Application réinitialisée");
     }
   ));
+
+  $("#resumeSessionBtn").addEventListener("click", () => {
+    const inProgress = findInProgressSession();
+    if (inProgress) openSession(inProgress.id);
+  });
+
+  $("#prevExerciseBtn").addEventListener("click", () => moveExercise(-1));
+  $("#nextExerciseBtn").addEventListener("click", () => moveExercise(1));
+  $("#timerBtn").addEventListener("click", toggleTimer);
+  $("#addTimerBtn").addEventListener("click", () => {
+    timerRemaining += 30;
+    if (!timerRunning) startTimerInterval();
+    updateTimerDisplay();
+  });
+
+  bindIssueDialog();
 
   window.addEventListener("beforeinstallprompt", event => {
     event.preventDefault();
@@ -367,76 +424,167 @@ function bindStaticEvents() {
   });
 }
 
+function bindIssueDialog() {
+  const dialog = $("#issueDialog");
+  $("#issueForm").addEventListener("submit", event => {
+    event.preventDefault();
+    if (!issueContext) return;
+    const session = state.week.sessions.find(item => item.id === issueContext.sessionId);
+    const exerciseData = session?.exercises.find(item => item.id === issueContext.exerciseId);
+    if (!session || !exerciseData) return;
+    const result = exerciseResult(session.id, exerciseData);
+    result.issues = [...$("#issueChoices").querySelectorAll("input:checked")].map(input => input.value);
+    result.technique_flags = [...$("#techniqueChoices").querySelectorAll("input:checked")].map(input => input.value);
+    result.pain = {
+      area: $("#painArea").value.trim(),
+      intensity: numberOrBlank($("#painIntensity").dataset.value),
+      continued: $("#painContinued").checked
+    };
+    result.note = $("#issueNote").value.trim();
+    if (result.issues.includes("replaced")) result.status = "replaced";
+    saveState();
+    dialog.close();
+    renderSession(session.id);
+    reopenExercise(exerciseData.id);
+    toast(result.issues.length ? "Problème enregistré" : "Signalement supprimé");
+  });
+
+  $("#issueChoices").addEventListener("change", toggleConditionalIssueFields);
+  $("#closeIssueDialog").addEventListener("click", () => dialog.close());
+}
+
 function showView(viewId) {
+  currentViewId = viewId;
   $$(".view").forEach(view => view.classList.toggle("active", view.id === viewId));
   $$(".nav-item").forEach(button => button.classList.toggle("active", button.dataset.view === viewId));
-  const titles = { weekView: "Ma semaine", sessionView: "Ma séance", reviewView: "Bilan", dataView: "Mes données" };
+  const titles = { weekView: "Accueil", sessionView: "Ma séance", historyView: "Historique", reviewView: "Bilan", dataView: "Mes données" };
   $("#pageTitle").textContent = titles[viewId] || "Coach Jérémy";
+  $("#trainingDock").classList.toggle("hidden", viewId !== "sessionView");
+  if (viewId === "weekView") renderWeek();
+  if (viewId === "sessionView") renderSession(currentSessionId);
+  if (viewId === "historyView") renderHistory();
+  if (viewId === "reviewView") {
+    hydrateReview();
+    renderReviewSummary();
+    refreshReportPreview();
+  }
+  updateResumeButton();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderCurrentView() {
+  if (currentViewId === "weekView") renderWeek();
+  else if (currentViewId === "sessionView") renderSession(currentSessionId);
+  else if (currentViewId === "historyView") renderHistory();
+  else if (currentViewId === "reviewView") {
+    hydrateReview();
+    renderReviewSummary();
+    refreshReportPreview();
+  }
+}
+
+function renderAll() {
+  renderWeek();
+  renderSession(currentSessionId);
+  renderHistory();
+  renderReviewSummary();
+  refreshReportPreview();
+  updateResumeButton();
 }
 
 function renderWeek() {
   $("#blockLabel").textContent = state.week.block_name || "Bloc actuel";
   $("#weekTitle").textContent = state.week.title || `Semaine ${state.week.number}`;
   $("#weekObjective").textContent = state.week.objective || "Objectif non renseigné";
-  const todayWeight = state.daily_weights[todayKey()] ?? "";
-  $("#dailyWeight").value = todayWeight;
+  $("#dailyWeight").value = state.daily_weights[todayKey()] ?? "";
+  renderTodayCard();
+  renderWeightTrend();
 
-  $("#sessionList").innerHTML = state.week.sessions.map(session => {
+  $("#sessionList").innerHTML = state.week.sessions.map((session, index) => {
     const result = sessionResult(session.id);
-    const doneExercises = session.exercises.filter(ex => ["success", "partial", "failed", "replaced", "skipped"].includes(exerciseResult(session.id, ex).status)).length;
-    const dotClass = result.status === "done" ? "done" : result.status === "in_progress" ? "progress" : "";
+    const doneExercises = session.exercises.filter(ex => FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status)).length;
+    const pct = session.exercises.length ? Math.round(doneExercises / session.exercises.length * 100) : 0;
+    const cardClass = result.status === "done" ? "done" : result.status === "in_progress" ? "progress" : "";
     return `
-      <article class="session-card">
-        <div class="session-card-top">
-          <div>
-            <p class="session-day">${escapeHtml(session.day || "Séance")}</p>
+      <button class="session-card ${cardClass} open-session" type="button" data-session-id="${escapeHtml(session.id)}">
+        <div class="session-card-main">
+          <span class="session-index">${result.status === "done" ? checkIcon() : index + 1}</span>
+          <div class="session-card-copy">
+            <p class="session-day">${escapeHtml(session.day || `Séance ${index + 1}`)}</p>
             <h3>${escapeHtml(session.title)}</h3>
-            <p class="muted small">${escapeHtml(session.goal || "")}</p>
           </div>
-          <span class="status-dot ${dotClass}" aria-label="${STATUS_LABELS[result.status]}"></span>
+          <span class="session-card-go">${chevronRightIcon()}</span>
         </div>
         <div class="session-card-meta">
-          <span class="pill soft">${session.estimated_duration_min || "—"} min</span>
-          <span class="pill soft">${doneExercises}/${session.exercises.length} exercices</span>
-          <span class="pill soft">${STATUS_LABELS[result.status] || "À faire"}</span>
+          <span>${session.estimated_duration_min || "—"} min</span>
+          <span>•</span>
+          <span>${doneExercises}/${session.exercises.length} exercices</span>
+          <span>•</span>
+          <span>${STATUS_LABELS[result.status] || "À faire"}</span>
         </div>
-        <button class="primary-button open-session" type="button" data-session-id="${session.id}">${result.status === "done" ? "Voir la séance" : result.status === "in_progress" ? "Continuer" : "Commencer"}</button>
-      </article>`;
+        <div class="mini-progress"><span style="width:${pct}%"></span></div>
+      </button>`;
   }).join("");
 
-  $$(".open-session").forEach(button => button.addEventListener("click", () => {
-    currentSessionId = button.dataset.sessionId;
-    const result = sessionResult(currentSessionId);
-    if (result.status === "planned") result.status = "in_progress";
-    saveState();
-    renderSession(currentSessionId);
-    showView("sessionView");
-  }));
-
+  $$(".open-session").forEach(button => button.addEventListener("click", () => openSession(button.dataset.sessionId)));
   renderSummary();
+}
+
+function renderTodayCard() {
+  const session = findTodaySession();
+  const container = $("#todayCard");
+  if (!session) {
+    container.innerHTML = `<article class="today-rest"><p class="section-kicker">AUJOURD’HUI</p><h2>Repos ou récupération</h2><p class="muted">Aucune séance n’est prévue aujourd’hui. La prochaine reste accessible ci-dessous.</p></article>`;
+    return;
+  }
+  const result = sessionResult(session.id);
+  const done = session.exercises.filter(ex => FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status)).length;
+  container.innerHTML = `
+    <article class="today-session">
+      <div class="today-label">${calendarIcon()} Séance du jour</div>
+      <h2>${escapeHtml(session.title)}</h2>
+      <p>${escapeHtml(session.goal || "")}</p>
+      <div class="today-meta"><span>${session.estimated_duration_min || "—"} min</span><span>${session.exercises.length} exercices</span><span>${done}/${session.exercises.length} validés</span></div>
+      <button class="light-button start-today" type="button">${result.status === "done" ? "Revoir la séance" : result.status === "in_progress" ? "Reprendre la séance" : "Commencer la séance"}</button>
+    </article>`;
+  container.querySelector(".start-today").addEventListener("click", () => openSession(session.id));
 }
 
 function renderSummary() {
   if (!state.week?.sessions) return;
-  const results = state.week.sessions.map(session => sessionResult(session.id));
-  const done = results.filter(result => result.status === "done").length;
-  const progress = state.week.sessions.length ? Math.round(done / state.week.sessions.length * 100) : 0;
-  $("#doneSessions").textContent = `${done}/${state.week.sessions.length}`;
-  $("#progressValue").textContent = `${progress}%`;
-  $("#progressRing").style.setProperty("--progress", `${progress * 3.6}deg`);
+  const metrics = calculateMetrics(state);
+  $("#doneSessions").textContent = `${metrics.doneSessions}/${metrics.totalSessions}`;
+  $("#progressValue").textContent = `${metrics.weekProgress}%`;
+  $("#progressRing").style.setProperty("--progress", `${metrics.weekProgress * 3.6}deg`);
+  $("#weekWeight").textContent = metrics.avgWeight ? `${metrics.avgWeight.toFixed(1)} kg` : "—";
+  $("#weekRpe").textContent = metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "—";
+}
 
-  const weights = Object.values(state.daily_weights).map(Number).filter(Number.isFinite);
-  $("#weekWeight").textContent = weights.length ? `${average(weights).toFixed(1)} kg` : "—";
+function renderWeightTrend() {
+  const all = allWeightEntries();
+  const latest = all.at(-1)?.value;
+  const lastSeven = all.slice(-7).map(item => item.value);
+  const previousSeven = all.slice(-14, -7).map(item => item.value);
+  const avg7 = lastSeven.length ? average(lastSeven) : null;
+  const prevAvg = previousSeven.length ? average(previousSeven) : null;
+  const delta = avg7 !== null && prevAvg !== null ? avg7 - prevAvg : null;
+  $("#weightTrend").innerHTML = `
+    <div><strong>${latest ? `${latest.toFixed(1)} kg` : "—"}</strong><span>dernière pesée</span></div>
+    <div><strong>${avg7 ? `${avg7.toFixed(1)} kg` : "—"}</strong><span>moyenne 7 pesées</span></div>
+    <div><strong>${delta === null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)} kg`}</strong><span>évolution</span></div>`;
+}
 
-  const rpes = [];
-  results.forEach(result => {
-    if (Number(result.global_rpe)) rpes.push(Number(result.global_rpe));
-    Object.values(result.exercises || {}).forEach(ex => (ex.sets || []).forEach(s => {
-      if (Number(s.rpe)) rpes.push(Number(s.rpe));
-    }));
-  });
-  $("#weekRpe").textContent = rpes.length ? average(rpes).toFixed(1) : "—";
+function openSession(sessionId) {
+  currentSessionId = sessionId;
+  const session = state.week.sessions.find(item => item.id === sessionId);
+  if (!session) return;
+  const result = sessionResult(sessionId);
+  if (result.status === "planned") result.status = "in_progress";
+  const firstIncomplete = session.exercises.find(ex => !FINISHED_EXERCISE_STATUSES.has(exerciseResult(sessionId, ex).status));
+  activeExerciseId = firstIncomplete?.id || session.exercises[0]?.id || null;
+  saveState();
+  renderSession(sessionId);
+  showView("sessionView");
 }
 
 function renderSession(sessionId) {
@@ -444,35 +592,51 @@ function renderSession(sessionId) {
   if (!session) return;
   currentSessionId = session.id;
   const result = sessionResult(session.id);
+  if (!activeExerciseId || !session.exercises.some(ex => ex.id === activeExerciseId)) {
+    activeExerciseId = session.exercises.find(ex => !FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status))?.id || session.exercises[0]?.id || null;
+  }
 
   $("#sessionDay").textContent = session.day || "Séance";
   $("#sessionTitle").textContent = session.title;
   $("#sessionGoal").textContent = session.goal || "";
-  $("#sessionDuration").textContent = `${session.estimated_duration_min || "—"} min prévues`;
   $("#sessionStatusPill").textContent = STATUS_LABELS[result.status] || "À faire";
   $("#sessionWeight").value = result.weight_kg || state.daily_weights[todayKey()] || "";
-  $("#sessionEnergy").value = result.energy_before || "";
   $("#actualDuration").value = result.actual_duration_min || "";
-  $("#sessionRpe").value = result.global_rpe || "";
   $("#sessionComment").value = result.comment || "";
   $("#completeSessionBtn").textContent = result.status === "done" ? "Séance terminée ✓" : "Terminer la séance";
 
+  renderRatingButtons($("#sessionEnergy"), range(1, 10), result.energy_before, value => updateSessionField("energy_before", value));
+  renderRpeButtons($("#sessionRpe"), result.global_rpe, value => updateSessionField("global_rpe", value));
+  renderSessionProgress(session);
+
   $("#exerciseList").innerHTML = session.exercises.map((exerciseData, index) => renderExerciseCard(session, exerciseData, index)).join("");
   bindExerciseEvents(session);
+  updateDockNavigation(session);
+}
+
+function renderSessionProgress(session) {
+  const done = session.exercises.filter(ex => FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status)).length;
+  const pct = session.exercises.length ? Math.round(done / session.exercises.length * 100) : 0;
+  $("#sessionProgressText").textContent = `${done}/${session.exercises.length} exercices`;
+  $("#sessionProgressPct").textContent = `${pct}%`;
+  $("#sessionProgressBar").style.width = `${pct}%`;
 }
 
 function renderExerciseCard(session, exerciseData, index) {
   const result = exerciseResult(session.id, exerciseData);
-  const prescription = prescriptionText(exerciseData.sets);
-  const completed = ["success", "partial", "failed", "replaced", "skipped"].includes(result.status);
+  const completed = FINISHED_EXERCISE_STATUSES.has(result.status);
+  const hasIssue = result.issues.length > 0;
+  const checkedSets = result.sets.filter(setData => setData.completed).length;
+  const isOpen = activeExerciseId === exerciseData.id;
+  const issueText = buildIssueSummary(result);
   return `
-    <article class="exercise-card ${index === 0 && !completed ? "open" : ""}" data-exercise-id="${exerciseData.id}">
+    <article class="exercise-card ${isOpen ? "open" : ""} ${completed ? "completed" : ""} ${hasIssue ? "has-issue" : ""}" data-exercise-id="${escapeHtml(exerciseData.id)}">
       <button class="exercise-summary" type="button">
-        <div>
+        <div class="exercise-summary-copy">
           <h3>${index + 1}. ${escapeHtml(exerciseData.name)}</h3>
-          <p class="muted small">${escapeHtml(prescription)}${completed ? ` · ${labelFor(EXERCISE_STATUSES, result.status)}` : ""}</p>
+          <p class="muted small">${escapeHtml(prescriptionText(exerciseData.sets))}${completed ? ` · ${labelFor(EXERCISE_STATUSES, result.status)}` : ""}</p>
         </div>
-        <span class="exercise-chevron">⌄</span>
+        <span class="exercise-state-icon">${completed ? checkIcon() : `<span class="exercise-chevron">${chevronDownIcon()}</span>`}</span>
       </button>
       <div class="exercise-body">
         <div class="prescription">
@@ -481,35 +645,28 @@ function renderExerciseCard(session, exerciseData, index) {
           ${exerciseData.adaptation_rule ? `<p><strong>Adaptation :</strong> ${escapeHtml(exerciseData.adaptation_rule)}</p>` : ""}
         </div>
 
-        <h4>Résultat</h4>
-        <div class="status-selector">
-          ${EXERCISE_STATUSES.map(([value, label]) => `
-            <label class="choice-chip">
-              <input type="radio" name="status-${exerciseData.id}" value="${value}" ${result.status === value ? "checked" : ""}>
-              <span>${label}</span>
-            </label>`).join("")}
+        <div class="exercise-rpe-block">
+          <span class="field-label">Difficulté de l’exercice (RPE)</span>
+          <div class="rpe-strip exercise-rpe" data-exercise-id="${escapeHtml(exerciseData.id)}">${rpeButtonsHtml(result.overall_rpe)}</div>
         </div>
 
-        <div class="sets-table">
+        <div class="quick-actions">
+          <button class="conform-button" type="button">${checkIcon()} Tout est conforme</button>
+          <button class="problem-button ${hasIssue ? "active" : ""}" type="button">${alertIcon()} ${hasIssue ? "Problème renseigné" : "Signaler un problème"}</button>
+        </div>
+        ${issueText ? `<div class="issue-summary">${escapeHtml(issueText)}</div>` : ""}
+
+        <label class="exercise-status-row"><span>Statut de l’exercice</span><select class="exercise-status-select">${EXERCISE_STATUSES.map(([value, label]) => `<option value="${value}" ${result.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+
+        <button class="sets-toggle" type="button"><span>Détail des séries</span><span>${checkedSets}/${result.sets.length} validées ${chevronDownIcon()}</span></button>
+        <div class="sets-panel ${result.show_sets ? "open" : ""}">
           ${result.sets.map((actualSet, setIndex) => renderSetRow(exerciseData, actualSet, setIndex)).join("")}
+          <button class="add-set" type="button">＋ Ajouter une série</button>
         </div>
-        <button class="add-set" type="button">＋ Ajouter une série</button>
 
-        <div class="exercise-options">
-          <h4>Un problème ?</h4>
-          <div class="tag-selector">
-            ${ISSUE_OPTIONS.map(([value, label]) => `
-              <label class="choice-chip">
-                <input type="checkbox" value="${value}" ${result.issues.includes(value) ? "checked" : ""}>
-                <span>${label}</span>
-              </label>`).join("")}
-          </div>
-          <label class="inline-toggle">
-            <input class="filmed-toggle" type="checkbox" ${result.filmed ? "checked" : ""}>
-            Série filmée ${exerciseData.film_requested ? "— demandée dans le programme" : ""}
-          </label>
-          <textarea class="exercise-note" rows="2" placeholder="Commentaire court sur l'exécution...">${escapeHtml(result.note || "")}</textarea>
-          <button class="primary-button exercise-complete" type="button">${completed ? "Enregistrer les modifications" : "Valider l'exercice"}</button>
+        <div class="exercise-footer">
+          <label class="film-toggle"><input class="filmed-toggle" type="checkbox" ${result.filmed ? "checked" : ""}> ${cameraIcon()} ${exerciseData.film_requested ? "Série à filmer" : "Série filmée"}</label>
+          <button class="primary-button exercise-complete" type="button">${completed ? "Enregistrer" : "Valider"}</button>
         </div>
       </div>
     </article>`;
@@ -517,24 +674,25 @@ function renderExerciseCard(session, exerciseData, index) {
 
 function renderSetRow(exerciseData, actualSet, index) {
   const planned = exerciseData.sets[index] || {};
+  const weightStep = inferWeightStep(exerciseData);
   return `
-    <div class="set-row" data-set-index="${index}">
+    <div class="set-row ${actualSet.completed ? "checked" : ""}" data-set-index="${index}">
       <span class="set-number">${index + 1}</span>
-      <div class="set-control">
-        <label>kg</label>
-        <input class="set-weight" type="number" step="0.5" inputmode="decimal" value="${actualSet.weight_kg ?? ""}" placeholder="${planned.weight_kg ?? "PDC"}">
+      <div>
+        <div class="stepper">
+          <button class="step-button" type="button" data-field="weight_kg" data-delta="-${weightStep}">−</button>
+          <input class="set-weight" type="number" step="${weightStep}" inputmode="decimal" value="${actualSet.weight_kg ?? ""}" placeholder="${planned.weight_kg ?? "PDC"}">
+          <button class="step-button" type="button" data-field="weight_kg" data-delta="${weightStep}">+</button>
+        </div><span class="set-unit">kg</span>
       </div>
-      <div class="set-control">
-        <label>reps</label>
-        <input class="set-reps" type="number" min="0" max="100" step="1" inputmode="numeric" value="${actualSet.reps ?? ""}">
+      <div>
+        <div class="stepper">
+          <button class="step-button" type="button" data-field="reps" data-delta="-1">−</button>
+          <input class="set-reps" type="number" min="0" max="100" step="1" inputmode="numeric" value="${actualSet.reps ?? ""}">
+          <button class="step-button" type="button" data-field="reps" data-delta="1">+</button>
+        </div><span class="set-unit">reps</span>
       </div>
-      <div class="set-control">
-        <label>RPE</label>
-        <select class="set-rpe">
-          <option value="">—</option>
-          ${halfRange(5, 10).map(rpe => `<option value="${rpe}" ${String(actualSet.rpe) === String(rpe) ? "selected" : ""}>${rpe}</option>`).join("")}
-        </select>
-      </div>
+      <button class="set-check ${actualSet.completed ? "checked" : ""}" type="button" aria-label="Valider la série">${checkIcon()}</button>
       <button class="remove-set" type="button" aria-label="Supprimer la série">×</button>
     </div>`;
 }
@@ -543,85 +701,125 @@ function bindExerciseEvents(session) {
   $$(".exercise-card").forEach(card => {
     const exerciseData = session.exercises.find(item => item.id === card.dataset.exerciseId);
     const result = exerciseResult(session.id, exerciseData);
-    card.querySelector(".exercise-summary").addEventListener("click", () => card.classList.toggle("open"));
 
-    card.querySelectorAll(`input[name="status-${exerciseData.id}"]`).forEach(input => input.addEventListener("change", event => {
+    card.querySelector(".exercise-summary").addEventListener("click", () => {
+      activeExerciseId = exerciseData.id;
+      $$(".exercise-card").forEach(other => other.classList.toggle("open", other === card && !card.classList.contains("open")));
+      if (!card.classList.contains("open")) card.classList.add("open");
+      updateDockNavigation(session);
+    });
+
+    card.querySelectorAll(".exercise-rpe .rpe-chip").forEach(button => button.addEventListener("click", () => {
+      result.overall_rpe = Number(button.dataset.value);
+      saveState();
+      card.querySelectorAll(".exercise-rpe .rpe-chip").forEach(item => item.classList.toggle("selected", item === button));
+    }));
+
+    card.querySelector(".conform-button").addEventListener("click", () => {
+      result.sets = exerciseData.sets.map(planned => ({ weight_kg: planned.weight_kg, reps: planned.reps, rpe: "", completed: true }));
+      result.status = "success";
+      saveState();
+      advanceAfterExercise(session, exerciseData.id, "Exercice validé conforme");
+    });
+
+    card.querySelector(".problem-button").addEventListener("click", () => openIssueDialog(session.id, exerciseData.id));
+
+    card.querySelector(".exercise-status-select").addEventListener("change", event => {
       result.status = event.target.value;
       saveState();
-    }));
+      renderSessionProgress(session);
+    });
 
-    card.querySelectorAll(".tag-selector input").forEach(input => input.addEventListener("change", () => {
-      result.issues = [...card.querySelectorAll(".tag-selector input:checked")].map(item => item.value);
+    card.querySelector(".sets-toggle").addEventListener("click", () => {
+      result.show_sets = !result.show_sets;
       saveState();
-    }));
+      renderSession(session.id);
+      reopenExercise(exerciseData.id);
+    });
+
+    card.querySelectorAll(".set-row").forEach(row => bindSetRow(row, result, exerciseData, session));
+
+    card.querySelector(".add-set").addEventListener("click", () => {
+      const last = result.sets.at(-1) || { weight_kg: "", reps: "", rpe: "", completed: false };
+      result.sets.push({ weight_kg: last.weight_kg, reps: last.reps, rpe: "", completed: false });
+      result.show_sets = true;
+      saveState();
+      renderSession(session.id);
+      reopenExercise(exerciseData.id);
+    });
 
     card.querySelector(".filmed-toggle").addEventListener("change", event => {
       result.filmed = event.target.checked;
       saveState();
     });
 
-    card.querySelector(".exercise-note").addEventListener("input", debounce(event => {
-      result.note = event.target.value;
-      saveState();
-    }, 250));
-
-    card.querySelectorAll(".set-row").forEach(row => bindSetRow(row, result, exerciseData));
-
-    card.querySelector(".add-set").addEventListener("click", () => {
-      const last = result.sets[result.sets.length - 1] || { weight_kg: "", reps: "", rpe: "" };
-      result.sets.push({ weight_kg: last.weight_kg, reps: last.reps, rpe: "" });
-      saveState();
-      renderSession(session.id);
-      reopenExercise(exerciseData.id);
-    });
-
     card.querySelector(".exercise-complete").addEventListener("click", () => {
-      syncCardSets(card, result);
-      if (result.status === "planned") result.status = "success";
-      const next = card.nextElementSibling;
-      card.classList.remove("open");
-      if (next?.classList.contains("exercise-card")) next.classList.add("open");
+      const completeSets = result.sets.filter(setData => setData.completed).length;
+      if (result.status === "planned") {
+        result.status = completeSets === result.sets.length ? "success" : completeSets > 0 ? "partial" : "success";
+      }
       saveState();
-      renderSession(session.id);
-      if (next) reopenExercise(next.dataset.exerciseId);
-      toast("Exercice enregistré");
+      advanceAfterExercise(session, exerciseData.id, "Exercice enregistré");
     });
   });
 }
 
-function bindSetRow(row, result, exerciseData) {
+function bindSetRow(row, result, exerciseData, session) {
   const index = Number(row.dataset.setIndex);
-  const update = () => {
+  const persistInputs = () => {
     if (!result.sets[index]) return;
     result.sets[index].weight_kg = numberOrBlank(row.querySelector(".set-weight").value);
     result.sets[index].reps = numberOrBlank(row.querySelector(".set-reps").value);
-    result.sets[index].rpe = numberOrBlank(row.querySelector(".set-rpe").value);
     saveState();
   };
-  row.querySelector(".set-weight").addEventListener("change", update);
-  row.querySelector(".set-reps").addEventListener("change", update);
-  row.querySelector(".set-rpe").addEventListener("change", update);
+  row.querySelector(".set-weight").addEventListener("change", persistInputs);
+  row.querySelector(".set-reps").addEventListener("change", persistInputs);
+  row.querySelectorAll(".step-button").forEach(button => button.addEventListener("click", () => {
+    const field = button.dataset.field;
+    const delta = Number(button.dataset.delta);
+    const input = field === "weight_kg" ? row.querySelector(".set-weight") : row.querySelector(".set-reps");
+    const current = numberOrBlank(input.value);
+    const planned = exerciseData.sets[index]?.[field];
+    const base = current === "" ? Number(planned ?? 0) : Number(current);
+    const next = field === "reps" ? Math.max(0, Math.round(base + delta)) : Math.max(0, roundToHalf(base + delta));
+    input.value = next;
+    result.sets[index][field] = next;
+    saveState();
+  }));
+  row.querySelector(".set-check").addEventListener("click", () => {
+    persistInputs();
+    result.sets[index].completed = !result.sets[index].completed;
+    const nowCompleted = result.sets[index].completed;
+    if (nowCompleted) startRest(exerciseData.sets[index]?.rest_sec || 90);
+    saveState();
+    row.classList.toggle("checked", nowCompleted);
+    row.querySelector(".set-check").classList.toggle("checked", nowCompleted);
+    renderSessionProgress(session);
+  });
   row.querySelector(".remove-set").addEventListener("click", () => {
     result.sets.splice(index, 1);
-    if (!result.sets.length) result.sets.push({ weight_kg: "", reps: "", rpe: "" });
+    if (!result.sets.length) result.sets.push({ weight_kg: "", reps: "", rpe: "", completed: false });
     saveState();
-    renderSession(currentSessionId);
+    renderSession(session.id);
     reopenExercise(exerciseData.id);
   });
 }
 
-function syncCardSets(card, result) {
-  result.sets = [...card.querySelectorAll(".set-row")].map(row => ({
-    weight_kg: numberOrBlank(row.querySelector(".set-weight").value),
-    reps: numberOrBlank(row.querySelector(".set-reps").value),
-    rpe: numberOrBlank(row.querySelector(".set-rpe").value)
-  }));
+function advanceAfterExercise(session, exerciseId, message) {
+  const index = session.exercises.findIndex(ex => ex.id === exerciseId);
+  const next = session.exercises.slice(index + 1).find(ex => !FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status)) || session.exercises[index + 1];
+  activeExerciseId = next?.id || exerciseId;
+  renderSession(session.id);
+  if (next) reopenExercise(next.id, true);
+  toast(message);
 }
 
-function reopenExercise(exerciseId) {
+function reopenExercise(exerciseId, scroll = false) {
   requestAnimationFrame(() => {
     const card = document.querySelector(`.exercise-card[data-exercise-id="${CSS.escape(exerciseId)}"]`);
-    if (card) card.classList.add("open");
+    if (!card) return;
+    $$(".exercise-card").forEach(other => other.classList.toggle("open", other === card));
+    if (scroll) card.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 
@@ -633,45 +831,188 @@ function updateSessionField(field, value) {
 }
 
 function completeCurrentSession() {
+  const session = state.week.sessions.find(item => item.id === currentSessionId);
+  if (!session) return;
   const result = sessionResult(currentSessionId);
   result.status = "done";
-  state.week.sessions.find(session => session.id === currentSessionId)?.exercises.forEach(exerciseData => {
+  session.exercises.forEach(exerciseData => {
     const exResult = exerciseResult(currentSessionId, exerciseData);
-    if (exResult.status === "planned") exResult.status = "success";
+    if (exResult.status === "planned") {
+      const doneSets = exResult.sets.filter(setData => setData.completed).length;
+      exResult.status = doneSets === exResult.sets.length && doneSets > 0 ? "success" : doneSets > 0 ? "partial" : "skipped";
+    }
   });
+  stopTimer();
   saveState();
   renderSession(currentSessionId);
   renderWeek();
   toast("Séance terminée");
 }
 
-function hydrateReview() {
-  const r = state.weekly_review;
-  $("#reviewSleep").value = r.sleep || "";
-  $("#reviewEnergy").value = r.energy || "";
-  $("#reviewHunger").value = r.hunger || "";
-  $("#reviewProtein").value = r.protein || "";
-  $("#reviewSteps").value = r.steps || "";
-  $("#reviewCardio").value = r.cardio || "";
-  $("#reviewEvents").value = r.events || "";
-  $("#reviewFeeling").value = r.feeling || "";
+function renderRatingButtons(container, values, selected, onSelect, suffix = "") {
+  container.dataset.value = selected ?? "";
+  container.innerHTML = values.map(value => `<button type="button" class="rating-button ${String(selected) === String(value) ? "selected" : ""}" data-value="${value}">${value}${suffix}</button>`).join("");
+  container.querySelectorAll(".rating-button").forEach(button => button.addEventListener("click", () => {
+    container.dataset.value = button.dataset.value;
+    container.querySelectorAll(".rating-button").forEach(item => item.classList.toggle("selected", item === button));
+    onSelect(numberOrBlank(button.dataset.value));
+  }));
 }
 
-function generateReport() {
-  const weights = Object.entries(state.daily_weights).map(([date, value]) => `${date}: ${value} kg`);
-  const sessionSections = state.week.sessions.map((session, index) => {
-    const result = sessionResult(session.id);
+function renderRpeButtons(container, selected, onSelect) {
+  container.innerHTML = rpeButtonsHtml(selected);
+  container.querySelectorAll(".rpe-chip").forEach(button => button.addEventListener("click", () => {
+    container.querySelectorAll(".rpe-chip").forEach(item => item.classList.toggle("selected", item === button));
+    onSelect(Number(button.dataset.value));
+  }));
+}
+
+function rpeButtonsHtml(selected) {
+  return halfRange(5, 10).map(value => `<button type="button" class="rpe-chip ${String(selected) === String(value) ? "selected" : ""}" data-value="${value}">${String(value).replace(".5", ",5")}</button>`).join("");
+}
+
+function hydrateReview() {
+  const review = state.weekly_review;
+  renderRatingButtons($("#reviewSleep"), range(1, 10), review.sleep, value => updateReview("sleep", value));
+  renderRatingButtons($("#reviewEnergy"), range(1, 10), review.energy, value => updateReview("energy", value));
+  renderRatingButtons($("#reviewHunger"), range(1, 10), review.hunger, value => updateReview("hunger", value));
+  renderRatingButtons($("#reviewProtein"), range(1, 7), review.protein, value => updateReview("protein", value), "/7");
+  $("#reviewSteps").value = review.steps || "";
+  $("#reviewCardio").value = review.cardio || "";
+  $("#reviewEvents").value = review.events || "";
+  $("#reviewFeeling").value = review.feeling || "";
+}
+
+function updateReview(field, value) {
+  state.weekly_review[field] = value;
+  saveState();
+  refreshReportPreview();
+}
+
+function renderReviewSummary() {
+  const metrics = calculateMetrics(state);
+  $("#reviewAutoSummary").innerHTML = `
+    <div class="summary-tile"><strong>${metrics.doneSessions}/${metrics.totalSessions}</strong><span>séances terminées</span></div>
+    <div class="summary-tile"><strong>${metrics.setCompletion}%</strong><span>séries validées</span></div>
+    <div class="summary-tile"><strong>${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "—"}</strong><span>RPE moyen</span></div>
+    <div class="summary-tile"><strong>${metrics.issueCount}</strong><span>problème${metrics.issueCount > 1 ? "s" : ""} signalé${metrics.issueCount > 1 ? "s" : ""}</span></div>`;
+}
+
+function refreshReportPreview() {
+  const preview = $("#reportPreview");
+  if (preview) preview.textContent = generateReport().slice(0, 2400) + (generateReport().length > 2400 ? "\n\n[…]" : "");
+}
+
+function renderHistory() {
+  const archived = state.history || [];
+  const totalWeeks = archived.length + 1;
+  const allSnapshots = [...archived, snapshotCurrent(false)];
+  const totalSessions = allSnapshots.reduce((sum, snapshot) => sum + calculateMetrics(snapshot).doneSessions, 0);
+  const allWeights = allWeightEntries();
+  const latestWeight = allWeights.at(-1)?.value;
+  $("#historyOverview").innerHTML = `
+    <article class="history-hero">
+      <p class="section-kicker light">VUE D’ENSEMBLE</p>
+      <h3>${totalWeeks} semaine${totalWeeks > 1 ? "s" : ""} suivie${totalWeeks > 1 ? "s" : ""}</h3>
+      <div class="history-stats">
+        <div><strong>${totalSessions}</strong><span>séances terminées</span></div>
+        <div><strong>${archived.length}</strong><span>semaines archivées</span></div>
+        <div><strong>${latestWeight ? `${latestWeight.toFixed(1)} kg` : "—"}</strong><span>dernière pesée</span></div>
+      </div>
+    </article>`;
+
+  if (!archived.length) {
+    $("#historyList").innerHTML = `<div class="empty-state"><strong>Aucune semaine archivée</strong><br><span class="small">La première apparaîtra ici lors de l’import du prochain programme.</span></div>`;
+    return;
+  }
+
+  $("#historyList").innerHTML = [...archived].reverse().map((snapshot, reverseIndex) => {
+    const index = archived.length - 1 - reverseIndex;
+    const metrics = calculateMetrics(snapshot);
+    return `
+      <details class="history-card">
+        <summary>
+          <div><p class="session-day">${escapeHtml(snapshot.week.block_name || "Bloc")}</p><h3>${escapeHtml(snapshot.week.title || `Semaine ${snapshot.week.number}`)}</h3><p class="muted small">Archivée le ${formatDate(snapshot.archived_at)}</p></div>
+          <span>${chevronDownIcon()}</span>
+        </summary>
+        <div class="history-body">
+          <div class="history-metrics">
+            <div><strong>${metrics.doneSessions}/${metrics.totalSessions}</strong><span>séances</span></div>
+            <div><strong>${metrics.setCompletion}%</strong><span>séries validées</span></div>
+            <div><strong>${metrics.avgWeight ? `${metrics.avgWeight.toFixed(1)} kg` : "—"}</strong><span>poids moyen</span></div>
+            <div><strong>${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "—"}</strong><span>RPE moyen</span></div>
+          </div>
+          <button class="secondary-button full-button download-history" type="button" data-history-index="${index}">Télécharger le bilan</button>
+        </div>
+      </details>`;
+  }).join("");
+  $$(".download-history").forEach(button => button.addEventListener("click", event => {
+    event.preventDefault();
+    const snapshot = state.history[Number(button.dataset.historyIndex)];
+    downloadText(`bilan-semaine-${snapshot.week.number || "archive"}.txt`, generateReport(snapshot), "text/plain;charset=utf-8");
+  }));
+}
+
+function calculateMetrics(targetState) {
+  const sessions = targetState.week?.sessions || [];
+  let plannedSets = 0;
+  let completedSets = 0;
+  let doneExercises = 0;
+  let totalExercises = 0;
+  let issueCount = 0;
+  const rpes = [];
+  sessions.forEach(session => {
+    const sr = sessionResult(session.id, targetState);
+    session.exercises.forEach(exerciseData => {
+      totalExercises += 1;
+      plannedSets += exerciseData.sets.length;
+      const er = exerciseResult(session.id, exerciseData, targetState);
+      if (FINISHED_EXERCISE_STATUSES.has(er.status)) doneExercises += 1;
+      completedSets += er.sets.filter(setData => setData.completed).length;
+      issueCount += er.issues.length ? 1 : 0;
+      if (Number(er.overall_rpe)) rpes.push(Number(er.overall_rpe));
+      er.sets.forEach(setData => { if (Number(setData.rpe)) rpes.push(Number(setData.rpe)); });
+    });
+    if (Number(sr.global_rpe)) rpes.push(Number(sr.global_rpe));
+  });
+  const weights = Object.values(targetState.daily_weights || {}).map(Number).filter(Number.isFinite);
+  const doneSessions = sessions.filter(session => sessionResult(session.id, targetState).status === "done").length;
+  return {
+    totalSessions: sessions.length,
+    doneSessions,
+    totalExercises,
+    doneExercises,
+    plannedSets,
+    completedSets,
+    setCompletion: plannedSets ? Math.round(completedSets / plannedSets * 100) : 0,
+    weekProgress: totalExercises ? Math.round(doneExercises / totalExercises * 100) : 0,
+    avgRpe: rpes.length ? average(rpes) : null,
+    avgWeight: weights.length ? average(weights) : null,
+    issueCount
+  };
+}
+
+function generateReport(targetState = state) {
+  const metrics = calculateMetrics(targetState);
+  const weights = Object.entries(targetState.daily_weights || {}).sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => `${date}: ${value} kg`);
+  const sessionSections = targetState.week.sessions.map((session, index) => {
+    const result = sessionResult(session.id, targetState);
     const exercises = session.exercises.map((exerciseData, exIndex) => {
-      const ex = exerciseResult(session.id, exerciseData);
-      const planned = exerciseData.sets.map((s, i) => `${i + 1}) ${formatWeight(s.weight_kg)} × ${s.reps} reps, RPE cible ${s.target_rpe_min}-${s.target_rpe_max}`).join(" ; ");
-      const actual = ex.sets.map((s, i) => `${i + 1}) ${formatWeight(s.weight_kg)} × ${s.reps || "—"} reps${s.rpe ? `, RPE ${s.rpe}` : ""}`).join(" ; ");
+      const ex = exerciseResult(session.id, exerciseData, targetState);
+      const planned = exerciseData.sets.map((setData, i) => `${i + 1}) ${formatWeight(setData.weight_kg)} × ${setData.reps} reps, RPE cible ${setData.target_rpe_min}-${setData.target_rpe_max}`).join(" ; ");
+      const actual = ex.sets.map((setData, i) => `${i + 1}) ${formatWeight(setData.weight_kg)} × ${setData.reps || "—"} reps${setData.rpe ? `, RPE ${setData.rpe}` : ""}${setData.completed ? " ✓" : ""}`).join(" ; ");
       const issues = ex.issues.length ? ex.issues.map(value => labelFor(ISSUE_OPTIONS, value)).join(", ") : "aucun signalé";
+      const technique = ex.technique_flags.length ? ex.technique_flags.map(value => labelFor(TECHNIQUE_OPTIONS, value)).join(", ") : "aucun";
+      const pain = ex.issues.includes("pain") ? `${ex.pain.area || "zone non précisée"}, intensité ${ex.pain.intensity || "—"}/10, exercice ${ex.pain.continued ? "poursuivi" : "arrêté ou non précisé"}` : "aucune";
       return [
         `${exIndex + 1}. ${exerciseData.name}`,
         `   - Statut : ${labelFor(EXERCISE_STATUSES, ex.status)}`,
+        `   - RPE exercice : ${ex.overall_rpe || "non renseigné"}`,
         `   - Prévu : ${planned}`,
         `   - Réalisé : ${actual}`,
         `   - Problèmes : ${issues}`,
+        `   - Détail technique : ${technique}`,
+        `   - Douleur : ${pain}`,
         `   - Filmé : ${ex.filmed ? "oui" : "non"}${exerciseData.film_requested ? " (demandé)" : ""}`,
         `   - Note : ${ex.note || "aucune"}`
       ].join("\n");
@@ -680,7 +1021,7 @@ function generateReport() {
     return [
       `SÉANCE ${index + 1} — ${session.day} — ${session.title}`,
       `Objectif : ${session.goal || "—"}`,
-      `Statut : ${STATUS_LABELS[result.status]}`,
+      `Statut : ${STATUS_LABELS[result.status] || result.status}`,
       `Poids : ${result.weight_kg ? `${result.weight_kg} kg` : "non renseigné"}`,
       `Énergie avant : ${result.energy_before ? `${result.energy_before}/10` : "non renseignée"}`,
       `Durée réelle : ${result.actual_duration_min ? `${result.actual_duration_min} min` : "non renseignée"}`,
@@ -691,7 +1032,8 @@ function generateReport() {
     ].join("\n");
   }).join("\n\n----------------------------------------\n\n");
 
-  const profile = state.athlete_profile || {};
+  const profile = targetState.athlete_profile || {};
+  const review = targetState.weekly_review || emptyWeeklyReview();
   return `SPORT_APP_WEEKLY_REPORT_START
 
 SCHÉMA_APPLICATION: ${APP_SCHEMA}
@@ -705,24 +1047,28 @@ PROFIL ATHLÈTE COMPACT
 - Contraintes : ${(profile.constraints || []).join(" ; ") || "—"}
 
 SEMAINE
-- Bloc : ${state.week.block_name || "—"}
-- Numéro : ${state.week.number || "—"}
-- Titre : ${state.week.title || "—"}
-- Objectif : ${state.week.objective || "—"}
-- Début : ${state.week.start_date || "—"}
+- Bloc : ${targetState.week.block_name || "—"}
+- Numéro : ${targetState.week.number || "—"}
+- Titre : ${targetState.week.title || "—"}
+- Objectif : ${targetState.week.objective || "—"}
+- Début : ${targetState.week.start_date || "—"}
+- Séances terminées : ${metrics.doneSessions}/${metrics.totalSessions}
+- Séries validées : ${metrics.completedSets}/${metrics.plannedSets} (${metrics.setCompletion} %)
+- RPE moyen : ${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "non calculable"}
+- Problèmes signalés : ${metrics.issueCount}
 
 PESÉES
 ${weights.length ? weights.map(item => `- ${item}`).join("\n") : "- Aucune pesée renseignée"}
 
 BILAN HEBDOMADAIRE
-- Sommeil : ${state.weekly_review.sleep ? `${state.weekly_review.sleep}/10` : "non renseigné"}
-- Énergie générale : ${state.weekly_review.energy ? `${state.weekly_review.energy}/10` : "non renseignée"}
-- Faim : ${state.weekly_review.hunger ? `${state.weekly_review.hunger}/10` : "non renseignée"}
-- Protéines : ${state.weekly_review.protein ? `${state.weekly_review.protein}/7 jours` : "non renseignées"}
-- Pas moyens : ${state.weekly_review.steps || "non renseignés"}
-- Cardio / activités : ${state.weekly_review.cardio || "aucun renseignement"}
-- Événements particuliers : ${state.weekly_review.events || "aucun"}
-- Impression visuelle / ressenti : ${state.weekly_review.feeling || "non renseigné"}
+- Sommeil : ${review.sleep ? `${review.sleep}/10` : "non renseigné"}
+- Énergie générale : ${review.energy ? `${review.energy}/10` : "non renseignée"}
+- Faim : ${review.hunger ? `${review.hunger}/10` : "non renseignée"}
+- Protéines : ${review.protein ? `${review.protein}/7 jours` : "non renseignées"}
+- Pas moyens : ${review.steps || "non renseignés"}
+- Cardio / activités : ${review.cardio || "aucun renseignement"}
+- Événements particuliers : ${review.events || "aucun"}
+- Impression visuelle / ressenti : ${review.feeling || "non renseigné"}
 
 DÉTAIL DES SÉANCES
 
@@ -738,7 +1084,7 @@ async function copyReport() {
   const report = generateReport();
   try {
     await navigator.clipboard.writeText(report);
-    toast("Bilan copié dans le presse-papiers");
+    toast("Bilan copié pour ChatGPT");
   } catch {
     fallbackCopy(report);
     toast("Bilan copié");
@@ -746,8 +1092,7 @@ async function copyReport() {
 }
 
 function downloadReport() {
-  const filename = `bilan-semaine-${state.week.number || "x"}.txt`;
-  downloadText(filename, generateReport(), "text/plain;charset=utf-8");
+  downloadText(`bilan-semaine-${state.week.number || "x"}.txt`, generateReport(), "text/plain;charset=utf-8");
 }
 
 async function pasteImport() {
@@ -755,34 +1100,70 @@ async function pasteImport() {
     $("#importText").value = await navigator.clipboard.readText();
     toast("Contenu collé");
   } catch {
-    toast("Autorise l'accès au presse-papiers ou colle manuellement");
+    toast("Autorise le presse-papiers ou colle manuellement");
   }
 }
 
-function importProgram() {
+function previewImport() {
+  const preview = $("#importPreview");
   try {
-    const parsed = parseImportText($("#importText").value);
-    validateProgram(parsed);
-    const preview = $("#importPreview");
-    preview.classList.remove("hidden");
-    preview.innerHTML = `<strong>${escapeHtml(parsed.week.title || `Semaine ${parsed.week.number}`)}</strong><br>${parsed.week.sessions.length} séances · ${parsed.week.sessions.reduce((sum, s) => sum + s.exercises.length, 0)} exercices. Import effectué.`;
-
-    const preservedProfile = parsed.athlete_profile || state.athlete_profile;
-    state = makeInitialState(parsed);
-    state.athlete_profile = preservedProfile;
-    currentSessionId = state.week.sessions[0]?.id || null;
-    saveState();
-    hydrateReview();
-    renderWeek();
-    renderSession(currentSessionId);
-    $("#importText").value = "";
-    toast("Nouvelle semaine importée");
+    pendingImport = parseImportText($("#importText").value);
+    validateProgram(pendingImport);
+    const totalExercises = pendingImport.week.sessions.reduce((sum, session) => sum + session.exercises.length, 0);
+    const totalMinutes = pendingImport.week.sessions.reduce((sum, session) => sum + Number(session.estimated_duration_min || 0), 0);
+    preview.className = "import-preview";
+    preview.removeAttribute("style");
+    preview.innerHTML = `
+      <strong>${escapeHtml(pendingImport.week.title || `Semaine ${pendingImport.week.number}`)}</strong>
+      <p class="small">${pendingImport.week.sessions.length} séances · ${totalExercises} exercices · ${formatDuration(totalMinutes)}</p>
+      <div class="import-session-list">${pendingImport.week.sessions.map(session => `<span><b>${escapeHtml(session.day || "Séance")}</b><em>${escapeHtml(session.title)}</em></span>`).join("")}</div>
+      <button id="confirmImportBtn" class="primary-button full-button" type="button">Archiver la semaine actuelle et importer</button>`;
+    $("#confirmImportBtn").addEventListener("click", confirmImport);
   } catch (error) {
-    $("#importPreview").classList.remove("hidden");
-    $("#importPreview").style.background = "var(--danger-soft)";
-    $("#importPreview").style.color = "var(--danger)";
-    $("#importPreview").textContent = `Import impossible : ${error.message}`;
+    pendingImport = null;
+    preview.className = "import-preview";
+    preview.style.background = "var(--danger-soft)";
+    preview.style.color = "var(--danger)";
+    preview.textContent = `Import impossible : ${error.message}`;
   }
+}
+
+function confirmImport() {
+  if (!pendingImport) return;
+  confirmAction(
+    "Importer la nouvelle semaine ?",
+    "La semaine actuelle sera conservée dans l’historique avant d’être remplacée.",
+    () => {
+      const archived = snapshotCurrent(true);
+      const history = [...(state.history || []), archived];
+      const preservedProfile = pendingImport.athlete_profile || state.athlete_profile;
+      state = makeInitialState(pendingImport, history);
+      state.athlete_profile = preservedProfile;
+      currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+      activeExerciseId = null;
+      pendingImport = null;
+      saveState();
+      $("#importText").value = "";
+      $("#importPreview").classList.add("hidden");
+      hydrateReview();
+      renderAll();
+      showView("weekView");
+      toast("Nouvelle semaine importée");
+    }
+  );
+}
+
+function snapshotCurrent(archive = true) {
+  return {
+    app_version: APP_VERSION,
+    schema_version: APP_SCHEMA,
+    athlete_profile: clone(state.athlete_profile),
+    week: clone(state.week),
+    daily_weights: clone(state.daily_weights),
+    session_results: clone(state.session_results),
+    weekly_review: clone(state.weekly_review),
+    archived_at: archive ? new Date().toISOString() : null
+  };
 }
 
 function parseImportText(text) {
@@ -790,9 +1171,7 @@ function parseImportText(text) {
   const start = text.indexOf("SPORT_APP_IMPORT_START");
   const end = text.indexOf("SPORT_APP_IMPORT_END");
   let jsonText = text.trim();
-  if (start !== -1 && end !== -1 && end > start) {
-    jsonText = text.slice(start + "SPORT_APP_IMPORT_START".length, end).trim();
-  }
+  if (start !== -1 && end !== -1 && end > start) jsonText = text.slice(start + "SPORT_APP_IMPORT_START".length, end).trim();
   jsonText = jsonText.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
   return JSON.parse(jsonText);
 }
@@ -802,15 +1181,15 @@ function validateProgram(program) {
   if (!program.week || !Array.isArray(program.week.sessions) || !program.week.sessions.length) throw new Error("la semaine ne contient aucune séance");
   const ids = new Set();
   program.week.sessions.forEach((session, sessionIndex) => {
-    if (!session.id || !session.title || !Array.isArray(session.exercises)) throw new Error(`séance ${sessionIndex + 1} incomplète`);
+    if (!session.id || !session.title || !Array.isArray(session.exercises) || !session.exercises.length) throw new Error(`séance ${sessionIndex + 1} incomplète`);
     if (ids.has(session.id)) throw new Error(`identifiant de séance dupliqué : ${session.id}`);
     ids.add(session.id);
-    session.exercises.forEach((ex, exIndex) => {
-      if (!ex.id || !ex.name || !Array.isArray(ex.sets) || !ex.sets.length) throw new Error(`exercice ${exIndex + 1} incomplet dans ${session.title}`);
-      if (ids.has(ex.id)) throw new Error(`identifiant dupliqué : ${ex.id}`);
-      ids.add(ex.id);
-      ex.sets.forEach((s, setIndex) => {
-        if (typeof s.reps !== "number") throw new Error(`répétitions invalides, ${session.title} / ${ex.name} / série ${setIndex + 1}`);
+    session.exercises.forEach((exerciseData, exIndex) => {
+      if (!exerciseData.id || !exerciseData.name || !Array.isArray(exerciseData.sets) || !exerciseData.sets.length) throw new Error(`exercice ${exIndex + 1} incomplet dans ${session.title}`);
+      if (ids.has(exerciseData.id)) throw new Error(`identifiant dupliqué : ${exerciseData.id}`);
+      ids.add(exerciseData.id);
+      exerciseData.sets.forEach((setData, setIndex) => {
+        if (typeof setData.reps !== "number") throw new Error(`répétitions invalides, ${session.title} / ${exerciseData.name} / série ${setIndex + 1}`);
       });
     });
   });
@@ -828,12 +1207,12 @@ function restoreBackup(event) {
     try {
       const parsed = JSON.parse(reader.result);
       if (!parsed.week?.sessions) throw new Error("format inconnu");
-      state = parsed;
-      currentSessionId = state.week.sessions[0]?.id || null;
+      state = migrateState(parsed);
+      currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+      activeExerciseId = null;
       saveState();
       hydrateReview();
-      renderWeek();
-      renderSession(currentSessionId);
+      renderAll();
       toast("Sauvegarde restaurée");
     } catch (error) {
       toast(`Restauration impossible : ${error.message}`);
@@ -843,16 +1222,152 @@ function restoreBackup(event) {
   event.target.value = "";
 }
 
+function openIssueDialog(sessionId, exerciseId) {
+  issueContext = { sessionId, exerciseId };
+  const session = state.week.sessions.find(item => item.id === sessionId);
+  const exerciseData = session?.exercises.find(item => item.id === exerciseId);
+  if (!exerciseData) return;
+  const result = exerciseResult(sessionId, exerciseData);
+  $("#issueChoices").innerHTML = ISSUE_OPTIONS.map(([value, label]) => `<label class="choice-chip"><input type="checkbox" value="${value}" ${result.issues.includes(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("");
+  $("#techniqueChoices").innerHTML = TECHNIQUE_OPTIONS.map(([value, label]) => `<label class="choice-chip"><input type="checkbox" value="${value}" ${result.technique_flags.includes(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("");
+  $("#painArea").value = result.pain.area || "";
+  $("#painContinued").checked = Boolean(result.pain.continued);
+  $("#issueNote").value = result.note || "";
+  renderRatingButtons($("#painIntensity"), range(1, 10), result.pain.intensity, value => { $("#painIntensity").dataset.value = value; });
+  toggleConditionalIssueFields();
+  $("#issueDialog").showModal();
+}
+
+function toggleConditionalIssueFields() {
+  const selected = [...$("#issueChoices").querySelectorAll("input:checked")].map(input => input.value);
+  $("#painFields").classList.toggle("hidden", !selected.includes("pain"));
+  $("#techniqueFields").classList.toggle("hidden", !selected.includes("technique"));
+}
+
+function buildIssueSummary(result) {
+  if (!result.issues.length) return "";
+  const labels = result.issues.map(value => labelFor(ISSUE_OPTIONS, value));
+  if (result.issues.includes("pain") && result.pain.area) labels.push(`${result.pain.area}${result.pain.intensity ? ` ${result.pain.intensity}/10` : ""}`);
+  return labels.join(" · ");
+}
+
+function updateResumeButton() {
+  const session = findInProgressSession();
+  const button = $("#resumeSessionBtn");
+  const shouldShow = Boolean(session) && currentViewId !== "sessionView";
+  button.classList.toggle("hidden", !shouldShow);
+  if (session) {
+    const done = session.exercises.filter(ex => FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status)).length;
+    button.textContent = `Reprendre ${session.title} · ${done}/${session.exercises.length}`;
+  }
+}
+
+function findInProgressSession() {
+  return state.week.sessions.find(session => sessionResult(session.id).status === "in_progress");
+}
+
+function findTodaySession() {
+  const day = DAY_NAMES[new Date().getDay()];
+  const exact = state.week.sessions.find(session => normalizeText(session.day).startsWith(normalizeText(day)));
+  return exact || findInProgressSession() || state.week.sessions.find(session => sessionResult(session.id).status !== "done") || state.week.sessions[0];
+}
+
+function updateDockNavigation(session) {
+  const index = Math.max(0, session.exercises.findIndex(ex => ex.id === activeExerciseId));
+  $("#prevExerciseBtn").disabled = index <= 0;
+  $("#nextExerciseBtn").disabled = index >= session.exercises.length - 1;
+}
+
+function moveExercise(direction) {
+  const session = state.week.sessions.find(item => item.id === currentSessionId);
+  if (!session) return;
+  const index = Math.max(0, session.exercises.findIndex(ex => ex.id === activeExerciseId));
+  const nextIndex = Math.min(session.exercises.length - 1, Math.max(0, index + direction));
+  activeExerciseId = session.exercises[nextIndex]?.id;
+  renderSession(session.id);
+  reopenExercise(activeExerciseId, true);
+}
+
+function startRest(seconds) {
+  timerRemaining = Number(seconds) || 90;
+  timerRunning = true;
+  startTimerInterval();
+  updateTimerDisplay();
+}
+
+function startTimerInterval() {
+  clearInterval(timerInterval);
+  timerRunning = true;
+  timerInterval = setInterval(() => {
+    if (!timerRunning) return;
+    timerRemaining = Math.max(0, timerRemaining - 1);
+    updateTimerDisplay();
+    if (timerRemaining === 0) {
+      stopTimer();
+      toast("Repos terminé");
+      if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+    }
+  }, 1000);
+}
+
+function toggleTimer() {
+  if (timerRemaining <= 0) {
+    startRest(90);
+    return;
+  }
+  timerRunning = !timerRunning;
+  if (timerRunning) startTimerInterval();
+  else clearInterval(timerInterval);
+  updateTimerDisplay();
+}
+
+function stopTimer() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+  timerRunning = false;
+  timerRemaining = 0;
+  updateTimerDisplay();
+}
+
+function updateTimerDisplay() {
+  const minutes = Math.floor(timerRemaining / 60);
+  const seconds = String(timerRemaining % 60).padStart(2, "0");
+  $("#timerDisplay").textContent = timerRemaining ? `${minutes}:${seconds}` : "Repos";
+  $("#timerHint").textContent = timerRemaining ? (timerRunning ? "Pause" : "Reprendre") : "Démarrer";
+}
+
+function inferWeightStep(exerciseData) {
+  if (Number(exerciseData.weight_step_kg)) return Number(exerciseData.weight_step_kg);
+  const name = normalizeText(exerciseData.name);
+  if (/haltere|elevation|oiseau|fente|rdl unilateral/.test(name)) return 2;
+  if (/poulie|tirage|leg curl|extension|presse/.test(name)) return 2.5;
+  return 2.5;
+}
+
 function prescriptionText(sets) {
   if (!sets?.length) return "Aucune série";
   const groups = [];
-  sets.forEach(s => {
-    const key = `${s.weight_kg ?? "PDC"}|${s.reps}|${s.target_rpe_min}-${s.target_rpe_max}`;
-    const previous = groups[groups.length - 1];
+  sets.forEach(setData => {
+    const key = `${setData.weight_kg ?? "PDC"}|${setData.reps}|${setData.target_rpe_min}-${setData.target_rpe_max}`;
+    const previous = groups.at(-1);
     if (previous?.key === key) previous.count += 1;
-    else groups.push({ key, count: 1, set: s });
+    else groups.push({ key, count: 1, set: setData });
   });
   return groups.map(group => `${group.count}×${group.set.reps} @ ${formatWeight(group.set.weight_kg)} · RPE ${group.set.target_rpe_min}-${group.set.target_rpe_max}`).join(" puis ");
+}
+
+function allWeightEntries() {
+  const entries = [];
+  (state.history || []).forEach(snapshot => Object.entries(snapshot.daily_weights || {}).forEach(([date, value]) => {
+    const number = Number(value);
+    if (Number.isFinite(number)) entries.push({ date, value: number });
+  }));
+  Object.entries(state.daily_weights || {}).forEach(([date, value]) => {
+    const number = Number(value);
+    if (Number.isFinite(number)) entries.push({ date, value: number });
+  });
+  const deduped = new Map(entries.map(item => [item.date, item.value]));
+  return [...deduped.entries()].map(([date, value]) => ({ date, value })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function formatWeight(value) {
@@ -865,18 +1380,48 @@ function labelFor(options, value) {
 
 function numberOrBlank(value) {
   if (value === "" || value === null || typeof value === "undefined") return "";
-  const n = Number(String(value).replace(",", "."));
-  return Number.isFinite(n) ? n : "";
+  const number = Number(String(value).replace(",", "."));
+  return Number.isFinite(number) ? number : "";
+}
+
+function range(min, max) {
+  return Array.from({ length: max - min + 1 }, (_, index) => min + index);
+}
+
+function halfRange(min, max) {
+  const values = [];
+  for (let number = min; number <= max; number += 0.5) values.push(number);
+  return values;
 }
 
 function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function roundToHalf(value) {
+  return Math.round(value * 2) / 2;
+}
+
 function todayKey() {
   const date = new Date();
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+}
+
+function formatDuration(minutes) {
+  if (!minutes) return "durée non renseignée";
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours} h ${String(rest).padStart(2, "0")}` : `${rest} min`;
+}
+
+function normalizeText(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 function escapeHtml(value) {
@@ -901,7 +1446,7 @@ function toast(message) {
   element.textContent = message;
   element.classList.add("show");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => element.classList.remove("show"), 2600);
+  toast.timer = setTimeout(() => element.classList.remove("show"), 2500);
 }
 
 function fallbackCopy(text) {
@@ -931,13 +1476,20 @@ function confirmAction(title, text, onConfirm) {
   const dialog = $("#confirmDialog");
   $("#dialogTitle").textContent = title;
   $("#dialogText").textContent = text;
-  const handler = event => {
+  const handler = () => {
     dialog.removeEventListener("close", handler);
     if (dialog.returnValue === "confirm") onConfirm();
   };
   dialog.addEventListener("close", handler);
   dialog.showModal();
 }
+
+function checkIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>`; }
+function chevronRightIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`; }
+function chevronDownIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`; }
+function calendarIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3m12-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></svg>`; }
+function cameraIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 10 4.5-2.5v9L15 14M4 6h11v12H4Z"/></svg>`; }
+function alertIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.4 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0Z"/></svg>`; }
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
