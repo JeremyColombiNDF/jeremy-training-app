@@ -1,8 +1,10 @@
-# Format d'import — Coach Jérémy
+# Format d’import Série
 
-Version de schéma attendue : `1.0`
+Version actuelle : `1.1`
 
-ChatGPT doit retourner un objet JSON compris entre les marqueurs :
+L’application accepte les schémas `1.0` et `1.1`, puis normalise les données vers `1.1`.
+
+La réponse de ChatGPT doit contenir un objet JSON entre les marqueurs :
 
 ```text
 SPORT_APP_IMPORT_START
@@ -10,50 +12,57 @@ SPORT_APP_IMPORT_START
 SPORT_APP_IMPORT_END
 ```
 
-## Structure obligatoire
+Le JSON ne doit pas être entouré de triples accents graves.
+
+## Schéma
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "athlete_profile": {
-    "name": "Jérémy",
-    "age": 26,
-    "height_m": 1.79,
-    "usual_frequency": "5 séances consécutives en semaine, 60 à 75 minutes",
-    "current_goal": "Objectif actuel",
-    "constraints": ["Contrainte 1", "Contrainte 2"]
+    "name": "facultatif",
+    "current_goal": "facultatif",
+    "constraints": ["facultatif"]
   },
   "week": {
-    "id": "bloc-x-week-2",
-    "number": 2,
+    "id": "week-unique-id",
+    "number": 1,
     "block_name": "Nom du bloc",
-    "title": "Semaine 2",
-    "objective": "Objectif synthétique de la semaine",
-    "start_date": "2026-08-03",
+    "title": "Semaine 1",
+    "objective": "Objectif général",
+    "start_date": "",
     "sessions": [
       {
-        "id": "week-2-session-1",
+        "id": "session-1",
         "day": "Lundi",
-        "title": "Upper force",
+        "title": "Titre de la séance",
         "goal": "Objectif de la séance",
-        "estimated_duration_min": 70,
-        "general_notes": "Consigne générale",
+        "estimated_duration_min": 60,
+        "general_notes": "Consignes générales facultatives",
         "exercises": [
           {
-            "id": "week-2-bench-main",
-            "name": "Développé couché",
-            "instructions": "Consignes techniques courtes",
-            "film_requested": true,
+            "id": "exercise-1",
+            "name": "Nom de l’exercice",
+            "instructions": "Consignes techniques facultatives",
+            "film_requested": false,
+            "adaptation_rule": "Règle d’adaptation facultative",
+            "superset_group": "A",
             "weight_step_kg": 2.5,
-            "adaptation_rule": "Réduire la charge si le RPE dépasse la cible",
             "sets": [
               {
                 "order": 1,
-                "weight_kg": 120,
-                "reps": 1,
+                "weight_kg": 100,
+                "reps": 5,
+                "reps_min": null,
+                "reps_max": null,
+                "duration_sec": null,
+                "distance_m": null,
                 "target_rpe_min": 7,
                 "target_rpe_max": 8,
-                "rest_sec": 180
+                "target_rir": null,
+                "rest_sec": 120,
+                "tempo": "",
+                "notes": ""
               }
             ]
           }
@@ -64,16 +73,57 @@ SPORT_APP_IMPORT_END
 }
 ```
 
-## Règles strictes
+## Types de prescriptions
 
-- Les séances sont affichées par ordre dans le tableau : `Jour 1`, `Jour 2`, etc. Le nombre de séances est libre (5, 6 ou autre).
-- Le champ `day` est facultatif dans son sens métier : il sert uniquement de suggestion calendaire (`Lundi`, `Mardi`, etc.). Il ne fixe jamais la date réelle de réalisation.
-- La date réelle est enregistrée par l’application lorsque l’utilisateur valide la séance ; elle ne doit pas être fournie par ChatGPT.
-- Tous les identifiants `id` doivent être uniques dans la semaine.
-- `weight_kg` est un nombre ou `null` pour le poids du corps / un exercice sans charge renseignée.
-- Chaque série est listée individuellement dans `sets`.
-- `reps`, `target_rpe_min`, `target_rpe_max`, `rest_sec` sont des nombres.
-- `film_requested` est un booléen : `true` ou `false`.
-- `weight_step_kg` est facultatif. Il permet de définir le pas des boutons `− / +` pour la charge ; l’application détermine sinon un pas automatiquement.
-- Aucun commentaire ne doit être ajouté dans le JSON.
-- Ne pas utiliser de séries résumées du type `4x8` dans un champ texte à la place du tableau `sets`.
+### Répétitions fixes
+
+```json
+{ "weight_kg": 100, "reps": 5, "reps_min": null, "reps_max": null }
+```
+
+### Plage de répétitions
+
+```json
+{ "weight_kg": 24, "reps": null, "reps_min": 8, "reps_max": 12 }
+```
+
+### Travail au temps
+
+```json
+{ "weight_kg": null, "reps": null, "duration_sec": 45 }
+```
+
+### Travail à la distance
+
+```json
+{ "weight_kg": null, "reps": null, "distance_m": 400 }
+```
+
+### RPE ou RIR
+
+Utiliser soit :
+
+```json
+{ "target_rpe_min": 7, "target_rpe_max": 8, "target_rir": null }
+```
+
+soit :
+
+```json
+{ "target_rpe_min": null, "target_rpe_max": null, "target_rir": 2 }
+```
+
+## Règles
+
+- L’ordre du tableau `sessions` détermine Jour 1, Jour 2, etc.
+- `day` est uniquement une suggestion calendaire.
+- La date réelle est enregistrée par l’application à la clôture de la séance.
+- Le nombre de séances et d’exercices est libre.
+- Chaque série doit être un objet distinct.
+- Tous les identifiants doivent être uniques dans la semaine.
+- Pour le poids du corps ou une charge libre, utiliser `weight_kg: null`.
+- Les champs numériques non utilisés doivent être `null`.
+- Les champs texte non utilisés doivent être des chaînes vides.
+- `superset_group` peut relier plusieurs exercices avec la même valeur.
+- `weight_step_kg` est facultatif et contrôle les boutons de charge.
+- Une série doit posséder au moins une mesure : répétitions, durée ou distance.

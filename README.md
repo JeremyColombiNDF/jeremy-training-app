@@ -1,58 +1,91 @@
-# Coach Jérémy — v0.6
+# Série — version 1.0
 
-Application web mobile de suivi sportif, optimisée pour l’iPhone 13, installable en PWA et synchronisée entre appareils.
+Série transforme un programme sportif conçu dans ChatGPT en carnet d’entraînement interactif, sans imposer de méthode de programmation.
 
-## Fonctionnalités principales
+## Principe
 
-- séances ordonnées en Jour 1, Jour 2, etc. ;
-- date réelle enregistrée uniquement à la clôture d’une séance ;
-- mode séance immersif sans navigation parasite ;
-- validation rapide `Conforme`, ajustement détaillé uniquement si nécessaire ;
-- charges, répétitions, séries, RPE, problèmes et commentaires ;
-- chronomètre de repos flottant ;
-- bilan hebdomadaire et export structuré pour ChatGPT ;
-- import JSON de la semaine suivante avec aperçu ;
-- archivage des semaines et records de charge par exercice ;
-- historique complet du poids, moyenne mobile 7 jours et périodes 30 jours / 3 mois / tout ;
-- mode clair et mode sombre automatiques ;
-- stockage local hors connexion ;
-- synchronisation automatique PC / iPhone avec Cloudflare D1 ;
+1. L’utilisateur crée un profil dans l’application.
+2. Il copie le prompt de configuration depuis `Données > Connecter ChatGPT`.
+3. Il colle ce prompt dans sa conversation ChatGPT habituelle.
+4. ChatGPT convertit le dernier programme validé au format Série.
+5. L’utilisateur importe la réponse et suit ses séances.
+6. En fin de semaine, Série génère un bilan structuré à redonner à ChatGPT.
+
+ChatGPT reste le coach ou le générateur de programme. Série reste l’outil d’exécution, de saisie, d’historique et d’échange.
+
+## Fonctionnalités
+
+- plusieurs profils sur un même appareil ;
+- couleur principale propre à chaque profil ;
+- sélection du profil au lancement ;
+- création de profil sans compte ni mot de passe ;
+- lien personnel de récupération et d’accès sur un autre appareil ;
+- synchronisation D1 isolée par profil ;
+- partage du lien public de l’application à un ami, sans partager son propre profil ;
+- assistant pédagogique de connexion à ChatGPT ;
+- prompt de configuration et demande de conversion copiables ;
+- import de programmes en schéma `1.1` ;
+- programmes de longueur libre ;
+- charges fixes, répétitions, plages de répétitions, durée, distance, RPE, RIR, tempo et supersets ;
+- mode séance immersif ;
+- validation rapide ou saisie détaillée ;
+- chronomètre de repos ;
+- problèmes, douleurs, vidéo et non-réalisation documentés ;
+- bilan hebdomadaire exportable vers ChatGPT ;
+- historique des semaines, records et pesées ;
+- graphique de poids avec moyenne mobile ;
+- fonctionnement hors connexion ;
+- mode clair et sombre automatiques ;
 - sauvegarde et restauration JSON.
 
-## Mise à jour du site
+## Mise en ligne
 
-Remplacer le contenu du dépôt par celui de cette version, puis effectuer :
-
-1. `Commit to main` dans GitHub Desktop ;
-2. `Push origin`.
-
-Cloudflare Pages republie automatiquement le site.
-
-## Configuration Cloudflare Pages
+Le projet est prévu pour Cloudflare Pages avec intégration GitHub.
 
 - Build command : laisser vide
 - Build output directory : `public`
+- Production branch : `main`
 
-Le dossier `functions` doit rester à la racine du dépôt : il contient l’API de synchronisation.
+Le dossier `functions` doit rester à la racine du dépôt. Il contient l’API de synchronisation.
 
-## Activer la synchronisation D1
+Après remplacement des fichiers :
 
-La synchronisation nécessite une base Cloudflare D1 liée au projet Pages sous le nom exact `DB`.
+1. ouvrir GitHub Desktop ;
+2. effectuer un commit ;
+3. cliquer sur `Push origin` ;
+4. laisser Cloudflare Pages redéployer automatiquement.
 
-Consulter le guide : [`docs/CONFIGURATION_SYNCHRONISATION.md`](docs/CONFIGURATION_SYNCHRONISATION.md).
+## Synchronisation Cloudflare D1
 
-La table est créée automatiquement au premier appel de l’application. Le fichier `migrations/0001_create_app_state.sql` est fourni comme référence.
+La base D1 doit être liée au projet Pages sous le nom exact `DB`. Si la version précédente était déjà synchronisée, aucune nouvelle liaison n’est nécessaire. La table multi-profils est créée automatiquement au premier échange.
 
-## Fonctionnement hors connexion
+Voir [`docs/CONFIGURATION_SYNCHRONISATION.md`](docs/CONFIGURATION_SYNCHRONISATION.md).
 
-Chaque changement est d’abord enregistré dans le navigateur. Si Internet est indisponible, les modifications restent locales et sont envoyées à la prochaine ouverture ou lorsque la connexion revient.
+## Compatibilité avec les anciennes données
 
-## Test local de l’interface
+Au premier lancement de la version 1.0 :
+
+- les données locales de l’ancienne application sont converties en profil ;
+- le programme, l’historique, les pesées et les résultats sont conservés ;
+- les appareils possédant le même ancien état génèrent le même identifiant de migration afin de retrouver une synchronisation commune.
+
+Une sauvegarde préalable reste recommandée.
+
+Le pas-à-pas de mise à jour se trouve dans [`docs/MIGRATION_V1.md`](docs/MIGRATION_V1.md).
+
+## Structure du projet
+
+```text
+public/                 interface PWA
+functions/api/sync.js   API Cloudflare Pages Functions
+migrations/             schémas SQL de référence
+docs/                   guides et format d’import
+```
+
+## Test local
 
 ```bash
 python3 -m http.server 8000 --directory public
 ```
 
-Puis ouvrir `http://localhost:8000`.
-
-L’API `/api/sync` ne fonctionne localement qu’avec un environnement Cloudflare Pages Functions configuré ; l’interface continue néanmoins à fonctionner en stockage local.
+Puis ouvrir `http://localhost:8000`. La synchronisation distante nécessite l’environnement Cloudflare ; toutes les fonctions locales restent utilisables sans lui.

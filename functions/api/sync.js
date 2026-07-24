@@ -1,5 +1,5 @@
-const STATE_ID = "primary";
-const MAX_STATE_BYTES = 1_500_000;
+const MAX_STATE_BYTES = 1_800_000;
+const PROFILE_ID_RE = /^[a-zA-Z0-9_-]{12,80}$/;
 
 function json(data, init = {}) {
   const headers = new Headers(init.headers || {});
@@ -15,8 +15,9 @@ async function ensureDatabase(env) {
     throw error;
   }
   await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS app_state (
-      id TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS profile_state (
+      profile_id TEXT PRIMARY KEY,
+      access_hash TEXT NOT NULL,
       state_json TEXT NOT NULL,
       revision INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL,
@@ -26,10 +27,30 @@ async function ensureDatabase(env) {
   `).run();
 }
 
-async function readRemote(env) {
+function readCredentials(request) {
+  const url = new URL(request.url);
+  const profileId = String(url.searchParams.get("profile_id") || "").trim();
+  const authorization = request.headers.get("authorization") || "";
+  const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  if (!PROFILE_ID_RE.test(profileId) || token.length < 24 || token.length > 200) {
+    const error = new Error("Profil ou clé de synchronisation invalide.");
+    error.code = "PROFILE_CREDENTIALS_REQUIRED";
+    error.status = 401;
+    throw error;
+  }
+  return { profileId, token };
+}
+
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function readRemote(env, profileId) {
   return env.DB.prepare(
-    "SELECT state_json, revision, updated_at, device_id, client_updated_at FROM app_state WHERE id = ?"
-  ).bind(STATE_ID).first();
+    "SELECT access_hash, state_json, revision, updated_at, device_id, client_updated_at FROM profile_state WHERE profile_id = ?"
+  ).bind(profileId).first();
 }
 
 function rowPayload(row) {
@@ -45,24 +66,43 @@ function rowPayload(row) {
   };
 }
 
-export async function onRequestGet({ env }) {
+async function authorizeExisting(row, token) {
+  if (!row) return;
+  const tokenHash = await sha256Hex(token);
+  if (tokenHash !== row.access_hash) {
+    const error = new Error("La clé de ce profil n'est pas valide.");
+    error.code = "PROFILE_ACCESS_DENIED";
+    error.status = 403;
+    throw error;
+  }
+}
+
+function errorResponse(error, fallbackCode) {
+  const status = error.status || (error.code === "DB_NOT_CONFIGURED" ? 503 : 500);
+  return json({ configured: error.code !== "DB_NOT_CONFIGURED", error: error.code || fallbackCode, message: error.message }, { status });
+}
+
+export async function onRequestGet({ request, env }) {
   try {
     await ensureDatabase(env);
-    return json(rowPayload(await readRemote(env)));
+    const { profileId, token } = readCredentials(request);
+    const row = await readRemote(env, profileId);
+    await authorizeExisting(row, token);
+    return json(rowPayload(row));
   } catch (error) {
-    const status = error.code === "DB_NOT_CONFIGURED" ? 503 : 500;
-    return json({ configured: false, error: error.code || "SYNC_READ_FAILED", message: error.message }, { status });
+    return errorResponse(error, "SYNC_READ_FAILED");
   }
 }
 
 export async function onRequestPut({ request, env }) {
   try {
     await ensureDatabase(env);
+    const { profileId, token } = readCredentials(request);
     const contentLength = Number(request.headers.get("content-length") || 0);
     if (contentLength > MAX_STATE_BYTES) return json({ error: "STATE_TOO_LARGE" }, { status: 413 });
 
     const body = await request.json();
-    if (!body || typeof body !== "object" || !body.state?.week?.sessions) {
+    if (!body || typeof body !== "object" || !body.state?.week || !Array.isArray(body.state.week.sessions)) {
       return json({ error: "INVALID_STATE", message: "État d'application invalide." }, { status: 400 });
     }
 
@@ -75,18 +115,21 @@ export async function onRequestPut({ request, env }) {
     const deviceId = String(body.device_id || "").slice(0, 100);
     const clientUpdatedAt = String(body.client_updated_at || body.state.updated_at || "").slice(0, 64);
     const now = new Date().toISOString();
-    const existing = await readRemote(env);
+    const existing = await readRemote(env, profileId);
+    await authorizeExisting(existing, token);
 
     if (!existing) {
       if (baseRevision !== 0) {
         return json({ error: "SYNC_CONFLICT", ...rowPayload(null) }, { status: 409 });
       }
+      const accessHash = await sha256Hex(token);
       const inserted = await env.DB.prepare(`
-        INSERT OR IGNORE INTO app_state (id, state_json, revision, updated_at, device_id, client_updated_at)
-        VALUES (?, ?, 1, ?, ?, ?)
-      `).bind(STATE_ID, stateJson, now, deviceId, clientUpdatedAt).run();
+        INSERT OR IGNORE INTO profile_state (profile_id, access_hash, state_json, revision, updated_at, device_id, client_updated_at)
+        VALUES (?, ?, ?, 1, ?, ?, ?)
+      `).bind(profileId, accessHash, stateJson, now, deviceId, clientUpdatedAt).run();
       if (!inserted.meta?.changes) {
-        const latest = await readRemote(env);
+        const latest = await readRemote(env, profileId);
+        await authorizeExisting(latest, token);
         return json({ error: "SYNC_CONFLICT", ...rowPayload(latest) }, { status: 409 });
       }
       return json({ ok: true, revision: 1, updated_at: now });
@@ -98,20 +141,33 @@ export async function onRequestPut({ request, env }) {
 
     const nextRevision = baseRevision + 1;
     const updated = await env.DB.prepare(`
-      UPDATE app_state
+      UPDATE profile_state
       SET state_json = ?, revision = ?, updated_at = ?, device_id = ?, client_updated_at = ?
-      WHERE id = ? AND revision = ?
-    `).bind(stateJson, nextRevision, now, deviceId, clientUpdatedAt, STATE_ID, baseRevision).run();
+      WHERE profile_id = ? AND revision = ?
+    `).bind(stateJson, nextRevision, now, deviceId, clientUpdatedAt, profileId, baseRevision).run();
 
     if (!updated.meta?.changes) {
-      const latest = await readRemote(env);
+      const latest = await readRemote(env, profileId);
+      await authorizeExisting(latest, token);
       return json({ error: "SYNC_CONFLICT", ...rowPayload(latest) }, { status: 409 });
     }
 
     return json({ ok: true, revision: nextRevision, updated_at: now });
   } catch (error) {
-    const status = error.code === "DB_NOT_CONFIGURED" ? 503 : 500;
-    return json({ configured: false, error: error.code || "SYNC_WRITE_FAILED", message: error.message }, { status });
+    return errorResponse(error, "SYNC_WRITE_FAILED");
+  }
+}
+
+export async function onRequestDelete({ request, env }) {
+  try {
+    await ensureDatabase(env);
+    const { profileId, token } = readCredentials(request);
+    const existing = await readRemote(env, profileId);
+    await authorizeExisting(existing, token);
+    if (existing) await env.DB.prepare("DELETE FROM profile_state WHERE profile_id = ?").bind(profileId).run();
+    return json({ ok: true });
+  } catch (error) {
+    return errorResponse(error, "SYNC_DELETE_FAILED");
   }
 }
 

@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.1",
+  "athlete_profile": {
+    "name": "Alex",
+    "current_goal": "Progression générale",
+    "constraints": []
+  },
+  "week": {
+    "id": "bloc-1-semaine-1",
+    "number": 1,
+    "block_name": "Bloc 1",
+    "title": "Semaine 1",
+    "objective": "Établir des repères propres sans aller à l’échec.",
+    "start_date": "",
+    "sessions": [
+      {
+        "id": "seance-1",
+        "day": "Lundi",
+        "title": "Full body",
+        "goal": "Travail technique et volume modéré.",
+        "estimated_duration_min": 60,
+        "general_notes": "Conserver une exécution stable.",
+        "exercises": [
+          {
+            "id": "squat",
+            "name": "Squat",
+            "instructions": "Amplitude constante et gainage actif.",
+            "film_requested": false,
+            "adaptation_rule": "Réduire la charge si la technique se dégrade.",
+            "superset_group": "",
+            "weight_step_kg": 2.5,
+            "sets": [
+              {
+                "order": 1,
+                "weight_kg": 80,
+                "reps": 5,
+                "reps_min": null,
+                "reps_max": null,
+                "duration_sec": null,
+                "distance_m": null,
+                "target_rpe_min": 7,
+                "target_rpe_max": 8,
+                "target_rir": null,
+                "rest_sec": 150,
+                "tempo": "",
+                "notes": ""
+              },
+              {
+                "order": 2,
+                "weight_kg": 80,
+                "reps": 5,
+                "reps_min": null,
+                "reps_max": null,
+                "duration_sec": null,
+                "distance_m": null,
+                "target_rpe_min": 7,
+                "target_rpe_max": 8,
+                "target_rir": null,
+                "rest_sec": 150,
+                "tempo": "",
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "id": "tractions",
+            "name": "Tractions",
+            "instructions": "Amplitude complète.",
+            "film_requested": false,
+            "adaptation_rule": "Utiliser un élastique si nécessaire.",
+            "superset_group": "",
+            "sets": [
+              {
+                "order": 1,
+                "weight_kg": null,
+                "reps": null,
+                "reps_min": 6,
+                "reps_max": 10,
+                "duration_sec": null,
+                "distance_m": null,
+                "target_rpe_min": null,
+                "target_rpe_max": null,
+                "target_rir": 2,
+                "rest_sec": 120,
+                "tempo": "",
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "id": "gainage",
+            "name": "Gainage",
+            "instructions": "Respiration contrôlée.",
+            "film_requested": false,
+            "adaptation_rule": "Arrêter si la position se dégrade.",
+            "superset_group": "",
+            "sets": [
+              {
+                "order": 1,
+                "weight_kg": null,
+                "reps": null,
+                "reps_min": null,
+                "reps_max": null,
+                "duration_sec": 45,
+                "distance_m": null,
+                "target_rpe_min": 7,
+                "target_rpe_max": 8,
+                "target_rir": null,
+                "rest_sec": 60,
+                "tempo": "",
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

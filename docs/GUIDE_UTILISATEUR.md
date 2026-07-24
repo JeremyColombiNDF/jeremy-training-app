@@ -1,98 +1,73 @@
-# Guide utilisateur — version 0.6
+# Guide utilisateur — Série 1.0
 
-## Démarrer une séance
+## 1. Créer ou choisir un profil
 
-1. Saisir le poids du matin sur l’accueil.
-2. Appuyer sur la carte de prochaine séance.
-3. Ajuster l’énergie avec les boutons `− / +`.
+À chaque lancement, Série affiche les profils enregistrés sur l’appareil.
 
-Les séances sont affichées en `Jour 1`, `Jour 2`, etc. Le jour de semaine est uniquement une suggestion. La date réelle n’est enregistrée que lorsque la séance est terminée ou déclarée non réalisée.
+Pour un nouveau profil :
 
-## Renseigner un exercice
+1. choisir `Créer un profil` ;
+2. saisir un prénom ou un pseudo ;
+3. choisir une couleur ;
+4. valider.
 
-### Lorsque tout est conforme
+Chaque profil possède son propre programme, ses pesées, ses records, son historique et sa synchronisation.
 
-1. Appuyer sur `Conforme`.
-2. Sélectionner le RPE de l’exercice.
-3. Appuyer sur `Valider l’exercice`.
+## 2. Connecter une conversation ChatGPT
 
-Les séries prévues sont reprises automatiquement et l’exercice suivant s’ouvre.
+Après la création du profil, l’assistant explique le parcours :
 
-### Lorsque le réalisé diffère du programme
+1. copier le prompt de configuration ;
+2. l’ouvrir dans la conversation ChatGPT déjà utilisée pour le programme ;
+3. laisser ChatGPT convertir le dernier programme validé ;
+4. copier la réponse ;
+5. revenir dans Série et importer la semaine.
 
-1. Appuyer sur `Ajuster`.
-2. Modifier la charge et les répétitions avec `− / +` ou par saisie directe.
-3. Cocher les séries terminées ; le chronomètre démarre automatiquement.
-4. Sélectionner le RPE.
-5. Valider l’exercice.
+Le prompt ne remplace pas le coach, l’historique ni la méthode de programmation. Il impose seulement un format d’échange.
 
-Le statut est calculé automatiquement : réussi si tout correspond, partiel en cas d’écart ou échec si aucune série n’est validée.
+Le même prompt reste disponible dans `Données > Connecter ChatGPT`.
 
-### Actions complémentaires
+## 3. Importer le programme
 
-Le bouton `•••` permet de :
+1. copier la réponse de ChatGPT contenant les marqueurs `SPORT_APP_IMPORT_START` et `SPORT_APP_IMPORT_END` ;
+2. ouvrir `Données` ;
+3. appuyer sur `Importer une nouvelle semaine` ;
+4. vérifier l’aperçu ;
+5. confirmer.
 
-- signaler un problème ;
-- indiquer qu’une série a été filmée ;
-- marquer l’exercice comme remplacé ;
-- marquer l’exercice comme non réalisé.
+L’application accepte les répétitions fixes, plages de répétitions, travaux au temps ou à la distance, RPE, RIR, tempo et supersets.
 
-## Chronomètre et fin de séance
+## 4. Utiliser une séance
 
-Le dock inférieur permet de passer d’un exercice à l’autre et de gérer le temps de repos. Après validation de tous les exercices, il affiche le bouton `Terminer`.
+- `Conforme` reprend automatiquement ce qui était prescrit.
+- `Ajuster` ouvre les séries pour modifier le réalisé.
+- `•••` permet de signaler un problème, une vidéo, un remplacement ou une non-réalisation.
+- Le chronomètre peut démarrer après validation d’une série.
+- La date réelle est enregistrée seulement lorsque la séance est terminée.
 
-La feuille de clôture demande la durée réelle, le RPE global et un commentaire éventuel. La date et l’heure sont enregistrées à cet instant.
+La séance peut être déclarée non réalisée avec une cause, qui sera intégrée au bilan ChatGPT.
 
-Pour ne pas réaliser une séance, ouvrir le menu `•••` en haut à droite puis expliquer la cause.
+## 5. Bilan hebdomadaire
 
-## Historique
+L’application calcule automatiquement les séances, séries, RPE ou RIR, problèmes et pesées. L’utilisateur complète seulement son ressenti.
 
-- `Semaines` : bilans archivés lors de chaque nouvel import.
-- `Records` : charge la plus lourde validée par exercice, répétitions et date.
-- `Poids` : graphique et liste complète des pesées.
+Appuyer ensuite sur `Copier le bilan pour ChatGPT`, puis coller le rapport dans la même conversation. ChatGPT génère la semaine suivante dans le format d’import.
 
-Le graphique du poids propose :
+## 6. Utiliser le même profil sur plusieurs appareils
 
-- les 30 derniers jours ;
-- les trois derniers mois ;
-- toute la période.
+Dans `Données > Profil`, choisir `Copier le lien pour un autre appareil` puis ouvrir ce lien sur le second appareil.
 
-La courbe orange en pointillés correspond à la moyenne mobile des sept dernières pesées. Les mesures sont regroupées par mois.
+Ce lien contient la clé du profil. Il ne doit pas être publié.
 
-## Bilan hebdomadaire
+## 7. Inviter un ami
 
-1. Ouvrir `Bilan`.
-2. Vérifier les indicateurs automatiques.
-3. Compléter sommeil, énergie, faim, protéines, pas, cardio et ressenti.
-4. Appuyer sur `Copier le bilan pour ChatGPT`.
-5. Coller le contenu dans le chat sportif.
+Dans `Données`, utiliser `Partager Série`. Le lien partagé est l’adresse publique de l’application et ne contient aucune donnée personnelle. L’ami créera son propre profil.
 
-## Importer la semaine suivante
+## 8. Sauvegarde
 
-1. Copier la réponse de ChatGPT contenant `SPORT_APP_IMPORT_START` et `SPORT_APP_IMPORT_END`.
-2. Ouvrir `Données`.
-3. Appuyer sur `Importer une nouvelle semaine`.
-4. Contrôler l’aperçu.
-5. Valider l’import.
+`Données > Maintenance` permet :
 
-Le contenu JSON brut reste replié. Il peut être ouvert manuellement lorsque l’accès au presse-papiers est refusé.
+- de télécharger une sauvegarde JSON ;
+- de restaurer une sauvegarde dans le profil actif.
 
-## Synchronisation PC / iPhone
-
-Lorsque Cloudflare D1 est configuré, la synchronisation se lance automatiquement :
-
-- à l’ouverture de l’application ;
-- après une modification ;
-- au retour de la connexion Internet.
-
-L’icône de nuage dans `Données` permet de forcer la synchronisation. Les données restent aussi enregistrées localement pour continuer hors connexion.
-
-## Réinitialisation et sauvegarde
-
-`Réinitialiser` conserve le programme et l’historique ; seules les validations, saisies et pesées de la semaine courante sont effacées.
-
-Télécharger ponctuellement une sauvegarde JSON depuis `Données`, notamment avant une restauration ou une modification importante.
-
-## Apparence
-
-L’application suit automatiquement le mode clair ou sombre défini sur l’iPhone. La navigation disparaît pendant une séance et lorsque le clavier est ouvert afin de maximiser l’espace utile.
+Une sauvegarde est recommandée avant une migration importante ou un choix de conflit.

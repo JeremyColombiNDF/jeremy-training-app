@@ -5,22 +5,52 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Carnet d'entraînement personnel de Jérémy">
+  <meta name="description" content="Transforme ton programme ChatGPT en carnet d’entraînement interactif.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Série">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="stylesheet" href="styles.css">
-  <title>Coach Jérémy</title>
+  <title>Série</title>
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <section id="profileGate" class="profile-gate" aria-label="Choix du profil">
+    <div class="profile-gate-shell">
+      <div class="app-brand-mark" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="profile-gate-heading">
+        <h1>Série</h1>
+        <p>Ton programme ChatGPT, prêt pour la salle.</p>
+      </div>
+      <div id="profileGatePanel" class="profile-gate-panel">
+        <div class="profile-gate-title-row">
+          <div><h2 id="profileGateTitle">Choisir un profil</h2><p id="profileGateSubtitle">Chaque profil garde son programme, son historique et sa couleur.</p></div>
+        </div>
+        <div id="profileGateList" class="profile-gate-list"></div>
+        <button id="createProfileFromGate" class="profile-create-button" type="button">
+          <span class="profile-create-icon">+</span>
+          <span><strong>Créer un profil</strong><small>Deux minutes, aucun compte requis</small></span>
+        </button>
+      </div>
+      <p class="profile-gate-footnote">Les données sont séparées par profil et peuvent être synchronisées entre appareils.</p>
+    </div>
+  </section>
+
   <header class="app-header">
     <h1 id="pageTitle">Accueil</h1>
-    <button id="installBtn" class="icon-button hidden" type="button" aria-label="Installer l'application">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
-    </button>
+    <div class="header-actions">
+      <button id="installBtn" class="icon-button hidden" type="button" aria-label="Installer l'application">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+      </button>
+      <button id="profileMenuBtn" class="profile-avatar-button" type="button" aria-label="Changer de profil">
+        <span id="headerProfileInitials">—</span>
+      </button>
+    </div>
   </header>
 
   <main id="app" class="app-shell">
@@ -37,7 +67,7 @@
           <div><strong id="doneSessions">0/0</strong><span>séances</span></div>
           <div><strong id="progressValue">0%</strong><span>progression</span></div>
           <div><strong id="weekWeight">—</strong><span>poids moyen</span></div>
-          <div class="week-rpe-stat"><strong id="weekRpe">—</strong><span>RPE moyen</span></div>
+          <div class="week-rpe-stat"><strong id="weekRpe">—</strong><span id="weekEffortLabel">RPE moyen</span></div>
         </div>
         <div class="week-progress"><span id="progressRing"></span></div>
       </article>
@@ -55,7 +85,7 @@
         </label>
       </section>
 
-      <div class="section-heading">
+      <div id="programSectionHeading" class="section-heading">
         <h2>Programme</h2>
         <button id="resetDemoBtn" class="text-button" type="button">Réinitialiser</button>
       </div>
@@ -160,7 +190,41 @@
     </section>
 
     <section id="dataView" class="view" aria-label="Données">
-      <div class="page-intro compact-intro"><p>Synchronisation, import et maintenance.</p></div>
+      <div class="page-intro compact-intro"><p>Profil, connexion à ChatGPT et sauvegarde.</p></div>
+
+      <article class="settings-group profile-settings-card">
+        <button id="openProfileSettingsBtn" class="settings-row profile-settings-row" type="button">
+          <span id="dataProfileAvatar" class="profile-settings-avatar">—</span>
+          <div class="settings-row-copy"><h3 id="dataProfileName">Profil</h3><p id="dataProfileMeta">Programme et historique personnels</p></div>
+          <svg class="row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </article>
+
+      <article class="settings-group chat-setup-card">
+        <div class="chat-setup-head">
+          <span class="settings-icon chat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4V5Z"/><path d="M8 9h8m-8 3h5"/></svg></span>
+          <div><h3>Connecter ChatGPT</h3><p>Garde ton coach et ta méthode. L’application ajoute seulement le bon format.</p></div>
+        </div>
+        <ol class="chat-setup-steps">
+          <li><span>1</span><p>Copie le prompt de configuration.</p></li>
+          <li><span>2</span><p>Colle-le dans ton chat de programme habituel.</p></li>
+          <li><span>3</span><p>Reviens ici et importe sa réponse.</p></li>
+        </ol>
+        <button id="copyChatSetupPromptBtn" class="primary-button full-button" type="button">Copier le prompt de configuration</button>
+        <div class="chat-setup-secondary-actions">
+          <button id="openChatGptBtn" class="list-action" type="button">Ouvrir ChatGPT</button>
+          <button id="copyConversionPromptBtn" class="list-action" type="button">Copier seulement la demande de conversion</button>
+        </div>
+        <p id="chatPromptStatus" class="chat-prompt-status"></p>
+      </article>
+
+      <article class="settings-group app-share-card">
+        <div class="app-share-head">
+          <span class="settings-icon share-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="7" r="2.5"/><path d="M3.5 19a4.5 4.5 0 0 1 9 0M13 17.5a4 4 0 0 1 7.5 1.5"/></svg></span>
+          <div><h3>Inviter un ami</h3><p>Partage le lien public. Il créera son propre profil, sans accéder au tien.</p></div>
+        </div>
+        <button id="shareAppBtn" class="secondary-button full-button" type="button">Partager Série</button>
+      </article>
 
       <article class="settings-group sync-card">
         <div class="settings-row sync-summary-row">
@@ -187,7 +251,7 @@
         <div id="importPreview" class="import-preview hidden"></div>
         <details id="rawImportDisclosure" class="settings-disclosure raw-import-disclosure">
           <summary>Afficher le contenu brut</summary>
-          <textarea id="importText" class="code-area" rows="8" spellcheck="false" placeholder='SPORT_APP_IMPORT_START\n{ "schema_version": "1.0", ... }\nSPORT_APP_IMPORT_END'></textarea>
+          <textarea id="importText" class="code-area" rows="8" spellcheck="false" placeholder='SPORT_APP_IMPORT_START\n{ "schema_version": "1.1", ... }\nSPORT_APP_IMPORT_END'></textarea>
           <button id="previewImportBtn" class="secondary-button full-button" type="button">Vérifier le contenu</button>
         </details>
       </article>
@@ -197,7 +261,7 @@
         <button id="backupBtn" class="settings-row list-button" type="button"><span>Télécharger une sauvegarde</span><svg class="row-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
         <label class="settings-row list-button file-row"><span>Restaurer une sauvegarde</span><svg class="row-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg><input id="restoreInput" type="file" accept="application/json,.json"></label>
       </article>
-      <p class="version-label">Coach Jérémy · Version 0.6</p>
+      <p class="version-label">Série · Version 1.0</p>
     </section>
   </main>
 
@@ -217,6 +281,57 @@
     <button class="nav-item" data-view="reviewView" type="button"><svg viewBox="0 0 24 24"><path d="M9 11 12 14 22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><small>Bilan</small></button>
     <button class="nav-item" data-view="dataView" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg><small>Données</small></button>
   </nav>
+
+  <dialog id="createProfileDialog" class="app-dialog sheet-dialog profile-form-dialog">
+    <form method="dialog" id="createProfileForm">
+      <div class="dialog-handle"></div>
+      <div class="dialog-head"><div><h3>Créer un profil</h3><p>Un prénom et une couleur suffisent.</p></div><button id="closeCreateProfile" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
+      <label class="profile-name-field"><span>Prénom ou pseudo</span><input id="newProfileName" type="text" maxlength="32" autocomplete="nickname" placeholder="Thomas" required></label>
+      <fieldset class="profile-color-fieldset"><legend>Couleur principale</legend><div id="newProfileColors" class="profile-color-grid"></div></fieldset>
+      <div class="profile-preview-card"><span id="newProfilePreviewAvatar" class="profile-preview-avatar">T</span><div><strong id="newProfilePreviewName">Ton profil</strong><small>Ton programme et tes données seront séparés.</small></div></div>
+      <button class="primary-button full-button" type="submit">Créer le profil</button>
+    </form>
+  </dialog>
+
+  <dialog id="profileSwitcherDialog" class="app-dialog sheet-dialog">
+    <div class="dialog-handle"></div>
+    <div class="dialog-head"><div><h3>Profils</h3><p>Choisis les données à ouvrir sur cet appareil.</p></div><button id="closeProfileSwitcher" class="close-dialog" type="button" aria-label="Fermer">×</button></div>
+    <div id="profileSwitcherList" class="profile-switcher-list"></div>
+    <button id="addProfileFromSwitcher" class="secondary-button full-button" type="button">Ajouter un profil</button>
+    <button id="manageCurrentProfileBtn" class="text-button full-button" type="button">Gérer le profil actuel</button>
+  </dialog>
+
+  <dialog id="profileSettingsDialog" class="app-dialog sheet-dialog profile-form-dialog">
+    <form method="dialog" id="profileSettingsForm">
+      <div class="dialog-handle"></div>
+      <div class="dialog-head"><div><h3>Mon profil</h3><p>Identité visuelle et accès entre appareils.</p></div><button id="closeProfileSettings" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
+      <label class="profile-name-field"><span>Prénom ou pseudo</span><input id="editProfileName" type="text" maxlength="32" autocomplete="nickname" required></label>
+      <fieldset class="profile-color-fieldset"><legend>Couleur principale</legend><div id="editProfileColors" class="profile-color-grid"></div></fieldset>
+      <button class="primary-button full-button" type="submit">Enregistrer</button>
+      <div class="profile-access-group">
+        <button id="copyProfileLinkBtn" class="list-action" type="button">Copier le lien pour un autre appareil</button>
+        <p>Le lien contient la clé du profil. Toute personne qui le possède peut accéder à ces données.</p>
+      </div>
+      <button id="deleteProfileBtn" class="danger-text-button full-button" type="button">Supprimer ce profil</button>
+    </form>
+  </dialog>
+
+  <dialog id="chatOnboardingDialog" class="app-dialog onboarding-dialog">
+    <div class="onboarding-dialog-visual" aria-hidden="true"><span></span><span></span><span></span></div>
+    <button id="closeChatOnboarding" class="close-dialog onboarding-close" type="button" aria-label="Fermer">×</button>
+    <div class="onboarding-dialog-copy">
+      <p class="context-label">Profil créé</p>
+      <h3>Transforme ton programme en application</h3>
+      <p>Tu gardes ta conversation ChatGPT, son historique et sa logique. Le prompt lui apprend seulement à échanger avec Série.</p>
+    </div>
+    <div class="onboarding-step-list">
+      <div><span>1</span><p><strong>Copie le prompt</strong><small>Il configure le format et demande la conversion du dernier programme validé.</small></p></div>
+      <div><span>2</span><p><strong>Colle-le dans ton chat habituel</strong><small>ChatGPT conserve le fond de ton coaching.</small></p></div>
+      <div><span>3</span><p><strong>Importe sa réponse</strong><small>Les séances deviennent interactives immédiatement.</small></p></div>
+    </div>
+    <button id="onboardingCopyPromptBtn" class="primary-button full-button" type="button">Copier le prompt</button>
+    <button id="onboardingLaterBtn" class="text-button full-button" type="button">Je le ferai plus tard</button>
+  </dialog>
 
   <dialog id="exerciseMenuDialog" class="app-dialog sheet-dialog">
     <div class="dialog-handle"></div>
@@ -254,7 +369,7 @@
       <div class="dialog-head"><div><h3>Signaler un problème</h3><p>Choisis seulement ce qui est utile.</p></div><button id="closeIssueDialog" type="button" value="cancel" class="close-dialog" aria-label="Fermer">×</button></div>
       <div id="issueChoices" class="tag-selector issue-grid"></div>
       <div id="painFields" class="conditional-fields hidden">
-        <label><span>Zone concernée</span><input id="painArea" type="text" placeholder="Poignet droit, genou..."></label>
+        <label><span>Zone concernée</span><input id="painArea" type="text" placeholder="Épaule, genou, dos..."></label>
         <div><span class="field-label">Intensité de la gêne</span><div id="painIntensity" class="rating-row"></div></div>
         <label class="inline-toggle"><input id="painContinued" type="checkbox"> Exercice poursuivi malgré la gêne</label>
       </div>
