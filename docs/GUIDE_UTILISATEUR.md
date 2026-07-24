@@ -1,65 +1,76 @@
-# Guide utilisateur — version 0.3
+# Guide utilisateur — version 0.5
 
-## Démarrer la séance
+## Démarrer une séance
 
-1. Saisir le poids du matin sur l'accueil.
-2. Appuyer sur la carte orange `Séance du jour`.
-3. Renseigner l'énergie avant la séance.
+1. Saisir le poids du matin sur l’accueil.
+2. Appuyer sur la carte de prochaine séance.
+3. Renseigner l’énergie avant la séance.
+
+Les séances sont affichées en `Jour 1`, `Jour 2`, etc. Le jour de semaine indiqué dans le programme est uniquement une suggestion. La date réelle est enregistrée quand la séance est clôturée.
 
 ## Renseigner un exercice
 
 ### Lorsque tout est conforme
 
-1. Sélectionner le RPE de l'exercice.
-2. Appuyer sur `Tout est conforme`.
+1. Sélectionner le RPE de l’exercice.
+2. Appuyer sur `Conforme`.
 
-Toutes les séries prévues sont alors validées et l'exercice suivant s'ouvre automatiquement.
+Les séries prévues sont validées et l’exercice suivant s’ouvre automatiquement.
 
 ### Lorsque le réalisé diffère du programme
 
-1. Ouvrir `Détail des séries`.
-2. Modifier la charge et les répétitions avec les boutons `− / +` ou par saisie directe.
-3. Cocher chaque série terminée. Le chronomètre de repos démarre automatiquement.
-4. Modifier le statut de l'exercice si nécessaire.
-5. Appuyer sur `Valider`.
+1. Ouvrir le détail des séries.
+2. Modifier la charge et les répétitions avec `− / +` ou par saisie directe.
+3. Cocher chaque série terminée ; le chronomètre de repos démarre automatiquement.
+4. Modifier le statut si nécessaire.
+5. Valider l’exercice.
 
 ### Signaler un problème
 
-Appuyer sur `Signaler un problème`, puis sélectionner une ou plusieurs causes. Les champs spécifiques à la douleur ou à la technique apparaissent uniquement lorsque nécessaires.
+Appuyer sur `Problème`, puis sélectionner une ou plusieurs causes. Les champs de douleur ou de technique apparaissent uniquement lorsque nécessaires.
 
-## Terminer la séance
+## Clôturer ou passer une séance
 
-Compléter la durée réelle, le RPE global et un éventuel commentaire, puis appuyer sur `Terminer la séance`.
+Après l’entraînement, compléter la durée, le RPE global et un commentaire éventuel, puis appuyer sur `Terminer la séance`.
+
+Si la séance n’est pas effectuée, utiliser `Je ne fais pas cette séance` et expliquer la cause. Cette information sera reprise dans l’export ChatGPT.
+
+## Historique
+
+- `Semaines` : bilans archivés lors de chaque nouvel import.
+- `Records` : charge la plus lourde validée par exercice, répétitions et date.
+- `Poids` : courbe des dernières pesées et liste exhaustive de toutes les mesures.
 
 ## En fin de semaine
 
 1. Ouvrir `Bilan`.
-2. Vérifier les statistiques calculées automatiquement.
+2. Vérifier les statistiques automatiques.
 3. Compléter sommeil, énergie, faim, protéines, pas, cardio et ressenti.
-4. Consulter éventuellement l'aperçu.
-5. Appuyer sur `Copier pour ChatGPT` et coller le bilan dans le chat sportif.
+4. Appuyer sur `Copier pour ChatGPT`.
+5. Coller le bilan dans le chat sportif.
 
 ## Importer la semaine suivante
 
-1. Copier le bloc compris entre `SPORT_APP_IMPORT_START` et `SPORT_APP_IMPORT_END` dans la réponse de ChatGPT.
+1. Copier la réponse de ChatGPT contenant `SPORT_APP_IMPORT_START` et `SPORT_APP_IMPORT_END`.
 2. Ouvrir `Données`.
-3. Coller le bloc puis appuyer sur `Vérifier`.
-4. Contrôler l'aperçu des séances.
+3. Coller puis appuyer sur `Vérifier`.
+4. Contrôler l’aperçu.
 5. Appuyer sur `Archiver la semaine actuelle et importer`.
 
-L'ancienne semaine reste disponible dans `Historique`.
+## Synchronisation PC / iPhone
 
-## Sauvegarde
+Lorsque Cloudflare D1 est configuré, la synchronisation se lance automatiquement :
 
-Les données sont locales au navigateur. Télécharger régulièrement une sauvegarde depuis `Données`, notamment avant de vider les données du navigateur ou de changer de téléphone.
+- à l’ouverture de l’application ;
+- après une modification ;
+- au retour de la connexion Internet.
 
+Le bouton `Synchroniser maintenant` permet de forcer l’opération. Toutes les données restent aussi enregistrées localement, ce qui permet de continuer hors connexion.
 
-## Ordre et dates des séances
+Lors de la première utilisation sur un deuxième appareil, si deux versions différentes existent, l’application demande laquelle conserver. Télécharger une sauvegarde avant le choix lorsque les deux versions contiennent des données utiles.
 
-Les cartes sont toujours affichées en `Jour 1`, `Jour 2`, etc. Le jour de semaine indiqué par ChatGPT est uniquement une suggestion. La date de réalisation est figée au moment où vous appuyez sur **Terminer la séance**.
+## Réinitialisation et sauvegarde
 
-Si une séance ne sera pas effectuée, utilisez **Je ne fais pas cette séance** et précisez la cause. Cette information sera incluse dans l’export ChatGPT.
+`Réinitialiser` conserve le programme et l’historique ; seules les validations, les saisies et les pesées de la semaine courante sont effacées.
 
-Le bouton **Réinitialiser** conserve le programme et l’historique ; il efface seulement les validations, les saisies et les pesées de la semaine courante.
-
-L’onglet **Historique > Records** affiche la charge la plus lourde validée pour chaque exercice, le nombre de répétitions et la date.
+La synchronisation ne remplace pas la sauvegarde JSON. Télécharger ponctuellement une sauvegarde depuis `Données`, notamment avant un changement important ou une restauration.

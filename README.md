@@ -1,49 +1,53 @@
-# Coach Jérémy — v0.4
+# Coach Jérémy — v0.5
 
-Application web mobile de suivi sportif, sans framework et sans serveur.
+Application web mobile de suivi sportif, optimisée pour iPhone et synchronisée entre appareils.
 
-## Fonctionnalités
+## Fonctionnalités principales
 
-- séances ordonnées en Jour 1, Jour 2, etc., avec le jour calendaire uniquement comme suggestion ;
-- reprise immédiate d'une séance en cours ;
-- poids quotidien, moyenne des sept dernières pesées et tendance ;
-- validation rapide d'un exercice conforme ;
-- modification des séries, charges et répétitions avec boutons `− / +` ;
-- RPE de 5 à 10 par paliers de 0,5 ;
-- validation série par série et chronomètre de repos ;
-- signalement guidé des douleurs et problèmes techniques ;
-- statuts manuels : réussi, partiel, échec, remplacé ou non réalisé ;
-- indication des séries filmées ;
-- progression visible pendant la séance ;
-- bilan hebdomadaire calculé et export optimisé pour ChatGPT ;
-- aperçu du programme avant import ;
-- archivage automatique de la semaine remplacée ;
-- historique consultable et exportable ;
-- records de charge par exercice avec répétitions et date ;
-- possibilité de clôturer une séance non réalisée en documentant la cause ;
-- réinitialisation de l’avancement sans supprimer la structure du programme ;
-- sauvegarde / restauration complète ;
+- séances ordonnées en Jour 1, Jour 2, etc. ;
+- date réelle enregistrée uniquement à la clôture d’une séance ;
+- séance non réalisée avec cause documentée ;
+- charges, répétitions, séries, RPE, problèmes et commentaires ;
+- chronomètre de repos ;
+- bilan hebdomadaire et export structuré pour ChatGPT ;
+- import JSON de la semaine suivante ;
+- archivage des semaines et records de charge par exercice ;
+- historique complet du poids avec courbe et journal de toutes les pesées ;
+- stockage local hors connexion ;
+- synchronisation automatique PC / iPhone avec Cloudflare D1 ;
+- bouton de synchronisation manuelle et gestion des conflits ;
+- sauvegarde et restauration JSON ;
 - installation possible en PWA.
 
-## Mise à jour depuis la v0.1
+## Mise à jour du site
 
-Remplacer les fichiers du dépôt par ceux de cette version, puis effectuer :
+Remplacer le contenu du dépôt par celui de cette version, puis effectuer :
 
 1. `Commit to main` dans GitHub Desktop ;
 2. `Push origin`.
 
-Cloudflare Pages republie automatiquement le site. Les données v0.1 déjà présentes dans le navigateur sont migrées vers le format v0.4 au premier chargement.
+Cloudflare Pages republie automatiquement le site.
 
-## Mise en ligne Cloudflare Pages
-
-Le dossier à publier est `public`.
+## Configuration Cloudflare Pages
 
 - Build command : laisser vide
 - Build output directory : `public`
 
-## Test local
+Le dossier `functions` doit rester à la racine du dépôt : il contient l’API de synchronisation.
 
-Depuis le dossier du projet :
+## Activer la synchronisation D1
+
+La synchronisation nécessite une base Cloudflare D1 liée au projet Pages sous le nom exact `DB`.
+
+Consulter le guide : [`docs/CONFIGURATION_SYNCHRONISATION.md`](docs/CONFIGURATION_SYNCHRONISATION.md).
+
+La table est créée automatiquement au premier appel de l’application. Le fichier `migrations/0001_create_app_state.sql` est fourni comme référence et pour une éventuelle création manuelle.
+
+## Fonctionnement hors connexion
+
+Chaque changement est d’abord enregistré dans le navigateur. Si Internet est indisponible, les modifications restent locales et sont envoyées à la prochaine ouverture ou lorsque la connexion revient.
+
+## Test local de l’interface
 
 ```bash
 python3 -m http.server 8000 --directory public
@@ -51,6 +55,4 @@ python3 -m http.server 8000 --directory public
 
 Puis ouvrir `http://localhost:8000`.
 
-## Stockage
-
-Les données sont conservées dans le navigateur avec `localStorage`. Elles ne sont pas synchronisées entre appareils. Utiliser régulièrement le bouton de sauvegarde dans `Données`.
+L’API `/api/sync` ne fonctionne localement qu’avec un environnement Cloudflare Pages Functions configuré ; l’interface continue néanmoins à fonctionner intégralement en stockage local.

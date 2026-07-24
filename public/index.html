@@ -149,6 +149,7 @@
       <div class="history-segmented" role="tablist" aria-label="Type d’historique">
         <button class="history-tab active" type="button" data-history-panel="weeks" role="tab" aria-selected="true">Semaines</button>
         <button class="history-tab" type="button" data-history-panel="records" role="tab" aria-selected="false">Records</button>
+        <button class="history-tab" type="button" data-history-panel="weights" role="tab" aria-selected="false">Poids</button>
       </div>
       <div id="historyWeeksPanel">
         <article id="historyOverview" class="history-overview"></article>
@@ -157,6 +158,23 @@
       <div id="historyRecordsPanel" class="hidden">
         <article id="recordsOverview" class="records-overview"></article>
         <div id="recordsList" class="records-list"></div>
+      </div>
+      <div id="historyWeightsPanel" class="hidden">
+        <article id="weightHistoryOverview" class="weight-history-overview"></article>
+        <article class="weight-chart-card">
+          <div class="weight-chart-heading">
+            <div>
+              <p class="section-kicker">ÉVOLUTION</p>
+              <h3>Courbe de poids</h3>
+            </div>
+            <span id="weightChartRange" class="weight-chart-range">Toutes les pesées</span>
+          </div>
+          <div id="weightChart" class="weight-chart" aria-label="Graphique de l’évolution du poids"></div>
+        </article>
+        <div class="section-heading weight-list-heading">
+          <div><p class="section-kicker">JOURNAL</p><h2>Toutes les pesées</h2></div>
+        </div>
+        <div id="weightHistoryList" class="weight-history-list"></div>
       </div>
     </section>
 
@@ -224,6 +242,34 @@
         </div>
       </div>
 
+
+      <article class="card sync-card">
+        <div class="sync-card-head">
+          <div class="sync-title-wrap">
+            <span id="syncStatusDot" class="sync-status-dot pending" aria-hidden="true"></span>
+            <div>
+              <p class="section-kicker">SYNCHRONISATION</p>
+              <h3 id="syncStatusLabel">Vérification en cours</h3>
+            </div>
+          </div>
+          <span id="syncCloudIcon" class="sync-cloud-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 8.5 4.5 4.5 0 0 0 7 18Z"/><path d="m9 14 3 3 3-3M12 17V9"/></svg>
+          </span>
+        </div>
+        <p id="syncStatusDetail" class="muted small">Les données restent enregistrées localement même hors connexion.</p>
+        <div class="sync-meta-row">
+          <span>Dernière synchronisation</span>
+          <strong id="lastSyncText">Jamais</strong>
+        </div>
+        <button id="syncNowBtn" class="primary-button full-button" type="button">Synchroniser maintenant</button>
+        <details class="sync-advanced">
+          <summary>Options avancées</summary>
+          <div class="button-stack">
+            <button id="pushLocalBtn" class="secondary-button" type="button">Envoyer cette version</button>
+            <button id="pullRemoteBtn" class="secondary-button" type="button">Récupérer la version en ligne</button>
+          </div>
+        </details>
+      </article>
       <article class="card">
         <h3>Importer la semaine suivante</h3>
         <p class="muted small">Colle le bloc JSON fourni par ChatGPT. La semaine actuelle sera archivée avant le remplacement.</p>
@@ -250,9 +296,9 @@
       <article class="card muted-card version-card">
         <div>
           <p class="section-kicker">VERSION</p>
-          <h3>Coach Jérémy v0.4</h3>
+          <h3>Coach Jérémy v0.5</h3>
         </div>
-        <p class="small muted">Données locales, historique intégré, aucun envoi automatique sur Internet.</p>
+        <p class="small muted">Sauvegarde locale et synchronisation Cloudflare entre tes appareils.</p>
       </article>
     </section>
   </main>
@@ -332,6 +378,21 @@
     </form>
   </dialog>
 
+
+  <dialog id="syncConflictDialog" class="app-dialog sync-conflict-dialog">
+    <form method="dialog">
+      <div class="sync-conflict-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.3 4.4 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0Z"/></svg>
+      </div>
+      <h3>Deux versions différentes</h3>
+      <p id="syncConflictText">Une version existe sur cet appareil et une autre en ligne.</p>
+      <div class="sync-conflict-actions">
+        <button id="useRemoteBtn" value="cancel" class="primary-button full-button" type="button">Utiliser la version en ligne</button>
+        <button id="keepLocalBtn" value="cancel" class="secondary-button full-button" type="button">Conserver cet appareil</button>
+        <button id="downloadConflictBackupBtn" value="cancel" class="text-button full-button" type="button">Télécharger une sauvegarde avant de choisir</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="confirmDialog" class="app-dialog">
     <form method="dialog">
       <h3 id="dialogTitle">Confirmation</h3>

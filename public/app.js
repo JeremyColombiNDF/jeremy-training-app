@@ -3,7 +3,10 @@
 const STORAGE_KEY = "coach_jeremy_state_v2";
 const LEGACY_STORAGE_KEY = "coach_jeremy_state_v1";
 const APP_SCHEMA = "1.0";
-const APP_VERSION = "0.4";
+const APP_VERSION = "0.5";
+const SYNC_META_KEY = "coach_jeremy_sync_meta_v1";
+const SYNC_ENDPOINT = "/api/sync";
+const SYNC_DELAY_MS = 1800;
 
 const STATUS_LABELS = {
   planned: "À faire",
@@ -229,6 +232,10 @@ let issueContext = null;
 let timerRemaining = 0;
 let timerRunning = false;
 let timerInterval = null;
+let syncMeta = loadSyncMeta();
+let syncTimer = null;
+let syncInFlight = false;
+let pendingRemoteConflict = null;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -283,9 +290,15 @@ function migrateState(parsed) {
   return migrated;
 }
 
-function saveState({ render = false } = {}) {
+function saveState({ render = false, sync = true } = {}) {
   state.updated_at = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (sync) {
+    syncMeta.dirty = true;
+    persistSyncMeta();
+    scheduleAutoSync();
+  }
+  renderSyncPanel();
   if (render) renderCurrentView();
   else {
     renderSummary();
@@ -343,6 +356,8 @@ function init() {
   renderReviewSummary();
   updateResumeButton();
   registerServiceWorker();
+  renderSyncPanel();
+  window.setTimeout(() => synchronize({ reason: "initial", silent: true }), 250);
 }
 
 function bindStaticEvents() {
@@ -389,6 +404,17 @@ function bindStaticEvents() {
   $("#previewImportBtn").addEventListener("click", previewImport);
   $("#backupBtn").addEventListener("click", downloadBackup);
   $("#restoreInput").addEventListener("change", restoreBackup);
+  $("#syncNowBtn").addEventListener("click", () => synchronize({ reason: "manual" }));
+  $("#pushLocalBtn").addEventListener("click", forcePushCurrentState);
+  $("#pullRemoteBtn").addEventListener("click", forcePullRemoteState);
+  $("#useRemoteBtn").addEventListener("click", resolveConflictWithRemote);
+  $("#keepLocalBtn").addEventListener("click", resolveConflictWithLocal);
+  $("#downloadConflictBackupBtn").addEventListener("click", downloadBackup);
+  window.addEventListener("online", () => synchronize({ reason: "online", silent: true }));
+  window.addEventListener("offline", renderSyncPanel);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") synchronize({ reason: "resume", silent: true });
+  });
   $("#resetDemoBtn").addEventListener("click", () => confirmAction(
     "Réinitialiser l’avancement ?",
     "Le programme et l’historique seront conservés. Seules les saisies, pesées et validations de la semaine actuelle seront effacées.",
@@ -478,6 +504,7 @@ function showView(viewId) {
   if (viewId === "weekView") renderWeek();
   if (viewId === "sessionView") renderSession(currentSessionId);
   if (viewId === "historyView") renderHistory();
+  if (viewId === "dataView") renderSyncPanel();
   if (viewId === "reviewView") {
     hydrateReview();
     renderReviewSummary();
@@ -491,6 +518,7 @@ function renderCurrentView() {
   if (currentViewId === "weekView") renderWeek();
   else if (currentViewId === "sessionView") renderSession(currentSessionId);
   else if (currentViewId === "historyView") renderHistory();
+  else if (currentViewId === "dataView") renderSyncPanel();
   else if (currentViewId === "reviewView") {
     hydrateReview();
     renderReviewSummary();
@@ -1042,18 +1070,22 @@ function renderHistory() {
     }));
   }
   renderRecords();
+  renderWeightHistory();
 }
 
 function showHistoryPanel(panel) {
   const records = panel === "records";
-  $("#historyWeeksPanel").classList.toggle("hidden", records);
+  const weights = panel === "weights";
+  $("#historyWeeksPanel").classList.toggle("hidden", records || weights);
   $("#historyRecordsPanel").classList.toggle("hidden", !records);
+  $("#historyWeightsPanel").classList.toggle("hidden", !weights);
   $$(".history-tab").forEach(button => {
     const active = button.dataset.historyPanel === panel;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", String(active));
   });
   if (records) renderRecords();
+  if (weights) renderWeightHistory();
 }
 
 function renderRecords() {
@@ -1082,6 +1114,117 @@ function renderRecords() {
         <small>${formatCompactDate(record.date)}</small>
       </div>
     </article>`).join("");
+}
+
+
+function renderWeightHistory() {
+  const entries = allWeightEntries();
+  const latest = entries.at(-1);
+  const recent = entries.slice(-7).map(item => item.value);
+  const first = entries[0];
+  const averageSeven = recent.length ? average(recent) : null;
+  const totalDelta = latest && first && entries.length > 1 ? latest.value - first.value : null;
+
+  $("#weightHistoryOverview").innerHTML = `
+    <article class="weight-history-hero">
+      <div class="weight-history-title">
+        <div>
+          <p class="section-kicker">SUIVI DU POIDS</p>
+          <h3>${entries.length} pesée${entries.length > 1 ? "s" : ""} enregistrée${entries.length > 1 ? "s" : ""}</h3>
+          <p>${latest ? `Dernière mesure le ${formatDate(latest.date)}` : "Renseigne ton poids depuis l’accueil ou une séance."}</p>
+        </div>
+        <span class="weight-scale-icon" aria-hidden="true">${scaleIcon()}</span>
+      </div>
+      <div class="weight-history-stats">
+        <div><strong>${latest ? `${latest.value.toFixed(1)} kg` : "—"}</strong><span>dernière</span></div>
+        <div><strong>${averageSeven !== null ? `${averageSeven.toFixed(1)} kg` : "—"}</strong><span>moy. 7 pesées</span></div>
+        <div><strong>${totalDelta === null ? "—" : `${totalDelta > 0 ? "+" : ""}${totalDelta.toFixed(1)} kg`}</strong><span>depuis le début</span></div>
+      </div>
+    </article>`;
+
+  renderWeightChart(entries);
+  if (!entries.length) {
+    $("#weightHistoryList").innerHTML = `<div class="empty-state"><strong>Aucune pesée enregistrée</strong><br><span class="small">Chaque poids saisi apparaîtra ici avec sa date.</span></div>`;
+    return;
+  }
+
+  const descending = [...entries].reverse();
+  $("#weightHistoryList").innerHTML = descending.map((entry, reverseIndex) => {
+    const chronologicalIndex = entries.length - 1 - reverseIndex;
+    const previous = entries[chronologicalIndex - 1];
+    const delta = previous ? entry.value - previous.value : null;
+    const deltaLabel = delta === null ? "Première mesure" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)} kg vs précédente`;
+    const deltaClass = delta === null ? "neutral" : delta > 0 ? "up" : delta < 0 ? "down" : "neutral";
+    return `
+      <article class="weight-entry-card">
+        <div class="weight-entry-date">
+          <strong>${formatDate(entry.date)}</strong>
+          <span class="weight-delta ${deltaClass}">${deltaLabel}</span>
+        </div>
+        <div class="weight-entry-value"><strong>${entry.value.toFixed(1)}</strong><span>kg</span></div>
+      </article>`;
+  }).join("");
+}
+
+function renderWeightChart(entries) {
+  const container = $("#weightChart");
+  if (!entries.length) {
+    $("#weightChartRange").textContent = "Aucune donnée";
+    container.innerHTML = `<div class="weight-chart-empty">La courbe apparaîtra après ta première pesée.</div>`;
+    return;
+  }
+
+  const displayed = entries.slice(-30);
+  $("#weightChartRange").textContent = entries.length > 30 ? "30 dernières pesées" : "Toutes les pesées";
+  if (displayed.length === 1) {
+    const only = displayed[0];
+    container.innerHTML = `
+      <svg class="weight-svg" viewBox="0 0 340 168" role="img" aria-label="Une pesée de ${only.value.toFixed(1)} kg">
+        <line class="weight-grid-line" x1="20" y1="82" x2="320" y2="82" />
+        <circle class="weight-chart-dot latest" cx="170" cy="82" r="5" />
+        <text class="weight-chart-value" x="170" y="62" text-anchor="middle">${only.value.toFixed(1)} kg</text>
+        <text class="weight-chart-date" x="170" y="146" text-anchor="middle">${escapeHtml(formatCompactDate(only.date))}</text>
+      </svg>`;
+    return;
+  }
+
+  const width = 340;
+  const height = 168;
+  const left = 22;
+  const right = 18;
+  const top = 22;
+  const bottom = 34;
+  const values = displayed.map(item => item.value);
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  const spread = Math.max(0.8, max - min);
+  min -= Math.max(0.35, spread * 0.18);
+  max += Math.max(0.35, spread * 0.18);
+  const x = index => left + (index / (displayed.length - 1)) * (width - left - right);
+  const y = value => top + ((max - value) / (max - min)) * (height - top - bottom);
+  const points = displayed.map((item, index) => `${x(index).toFixed(1)},${y(item.value).toFixed(1)}`).join(" ");
+  const areaPoints = `${left},${height-bottom} ${points} ${width-right},${height-bottom}`;
+  const latest = displayed.at(-1);
+  const middleValue = (min + max) / 2;
+  const dateIndices = [...new Set([0, Math.floor((displayed.length - 1) / 2), displayed.length - 1])];
+
+  container.innerHTML = `
+    <svg class="weight-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Évolution du poids de ${displayed[0].value.toFixed(1)} à ${latest.value.toFixed(1)} kg">
+      <defs>
+        <linearGradient id="weightAreaGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="currentColor" stop-opacity=".24"/>
+          <stop offset="100%" stop-color="currentColor" stop-opacity=".02"/>
+        </linearGradient>
+      </defs>
+      <line class="weight-grid-line" x1="${left}" y1="${y(max).toFixed(1)}" x2="${width-right}" y2="${y(max).toFixed(1)}" />
+      <line class="weight-grid-line" x1="${left}" y1="${y(middleValue).toFixed(1)}" x2="${width-right}" y2="${y(middleValue).toFixed(1)}" />
+      <line class="weight-grid-line" x1="${left}" y1="${y(min).toFixed(1)}" x2="${width-right}" y2="${y(min).toFixed(1)}" />
+      <polygon class="weight-chart-area" points="${areaPoints}" />
+      <polyline class="weight-chart-line" points="${points}" />
+      ${displayed.map((item, index) => `<circle class="weight-chart-dot ${index === displayed.length - 1 ? "latest" : ""}" cx="${x(index).toFixed(1)}" cy="${y(item.value).toFixed(1)}" r="${index === displayed.length - 1 ? 4.8 : 2.8}" />`).join("")}
+      <text class="weight-chart-value" x="${x(displayed.length - 1).toFixed(1)}" y="${Math.max(15, y(latest.value)-13).toFixed(1)}" text-anchor="end">${latest.value.toFixed(1)} kg</text>
+      ${dateIndices.map(index => `<text class="weight-chart-date" x="${x(index).toFixed(1)}" y="${height-10}" text-anchor="${index === 0 ? "start" : index === displayed.length - 1 ? "end" : "middle"}">${escapeHtml(formatCompactDate(displayed[index].date))}</text>`).join("")}
+    </svg>`;
 }
 
 function calculateExerciseRecords() {
@@ -1527,6 +1670,323 @@ function prescriptionText(sets) {
   return groups.map(group => `${group.count}×${group.set.reps} @ ${formatWeight(group.set.weight_kg)} · RPE ${group.set.target_rpe_min}-${group.set.target_rpe_max}`).join(" puis ");
 }
 
+
+function loadSyncMeta() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SYNC_META_KEY) || "{}");
+    return {
+      device_id: parsed.device_id || createDeviceId(),
+      remote_revision: Number(parsed.remote_revision || 0),
+      last_synced_at: parsed.last_synced_at || "",
+      dirty: typeof parsed.dirty === "boolean" ? parsed.dirty : false,
+      configured: typeof parsed.configured === "boolean" ? parsed.configured : null,
+      last_error: parsed.last_error || ""
+    };
+  } catch {
+    return { device_id: createDeviceId(), remote_revision: 0, last_synced_at: "", dirty: false, configured: null, last_error: "" };
+  }
+}
+
+function createDeviceId() {
+  if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+  return `device-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function persistSyncMeta() {
+  localStorage.setItem(SYNC_META_KEY, JSON.stringify(syncMeta));
+}
+
+function scheduleAutoSync() {
+  clearTimeout(syncTimer);
+  if (syncMeta.configured === false || !navigator.onLine) return;
+  syncTimer = setTimeout(() => synchronize({ reason: "auto", silent: true }), SYNC_DELAY_MS);
+}
+
+function renderSyncPanel() {
+  const dot = $("#syncStatusDot");
+  const label = $("#syncStatusLabel");
+  const detail = $("#syncStatusDetail");
+  const last = $("#lastSyncText");
+  const button = $("#syncNowBtn");
+  if (!dot || !label || !detail || !last || !button) return;
+
+  let kind = "pending";
+  let title = "Prêt à synchroniser";
+  let description = "Les données restent enregistrées localement même hors connexion.";
+  if (!navigator.onLine) {
+    kind = "offline";
+    title = "Hors connexion";
+    description = "Tes modifications sont conservées et seront envoyées au retour du réseau.";
+  } else if (syncInFlight) {
+    kind = "syncing";
+    title = "Synchronisation…";
+    description = "Échange des données avec Cloudflare.";
+  } else if (pendingRemoteConflict) {
+    kind = "conflict";
+    title = "Choix nécessaire";
+    description = "Deux versions différentes existent. Choisis celle à conserver.";
+  } else if (syncMeta.configured === false) {
+    kind = "unavailable";
+    title = "Configuration nécessaire";
+    description = "Crée la base D1 et ajoute la liaison DB dans Cloudflare Pages.";
+  } else if (syncMeta.dirty) {
+    kind = "pending";
+    title = "Modifications en attente";
+    description = "La sauvegarde locale est à jour ; l’envoi en ligne va démarrer.";
+  } else if (syncMeta.last_synced_at) {
+    kind = "synced";
+    title = "Données à jour";
+    description = "Cette version est la même sur le PC et l’iPhone.";
+  }
+
+  dot.className = `sync-status-dot ${kind}`;
+  label.textContent = title;
+  detail.textContent = description;
+  last.textContent = syncMeta.last_synced_at ? formatDateTime(syncMeta.last_synced_at) : "Jamais";
+  button.disabled = syncInFlight || !navigator.onLine;
+  button.textContent = syncInFlight ? "Synchronisation…" : pendingRemoteConflict ? "Résoudre le conflit" : "Synchroniser maintenant";
+}
+
+async function synchronize({ reason = "manual", silent = false } = {}) {
+  if (syncInFlight) return;
+  if (pendingRemoteConflict) {
+    showSyncConflictDialog(pendingRemoteConflict);
+    return;
+  }
+  if (!navigator.onLine) {
+    renderSyncPanel();
+    if (!silent) toast("Pas de connexion Internet");
+    return;
+  }
+
+  clearTimeout(syncTimer);
+  syncInFlight = true;
+  renderSyncPanel();
+  try {
+    const remote = await fetchRemoteState();
+    syncMeta.configured = true;
+    syncMeta.last_error = "";
+
+    if (!remote.exists) {
+      await pushLocalState(0, { silent });
+      return;
+    }
+
+    if (!syncMeta.remote_revision) {
+      if (hasMeaningfulLocalData()) {
+        setSyncConflict(remote);
+        if (!silent || reason === "initial") showSyncConflictDialog(remote);
+      } else {
+        applyRemoteState(remote);
+        if (!silent) toast("Version en ligne récupérée");
+      }
+      return;
+    }
+
+    if (remote.revision === syncMeta.remote_revision) {
+      if (syncMeta.dirty) await pushLocalState(remote.revision, { silent });
+      else {
+        syncMeta.last_synced_at = remote.updated_at || syncMeta.last_synced_at;
+        persistSyncMeta();
+        if (!silent) toast("Données déjà à jour");
+      }
+      return;
+    }
+
+    if (!syncMeta.dirty) {
+      applyRemoteState(remote);
+      if (!silent) toast("Dernière version récupérée");
+      return;
+    }
+
+    setSyncConflict(remote);
+    showSyncConflictDialog(remote);
+  } catch (error) {
+    handleSyncError(error, silent);
+  } finally {
+    syncInFlight = false;
+    renderSyncPanel();
+  }
+}
+
+async function fetchRemoteState() {
+  const response = await fetch(SYNC_ENDPOINT, { method: "GET", headers: { accept: "application/json" }, cache: "no-store" });
+  const payload = await safeJson(response);
+  if (!response.ok) {
+    const error = new Error(payload.message || "La synchronisation est indisponible.");
+    error.status = response.status;
+    error.code = payload.error;
+    throw error;
+  }
+  return payload;
+}
+
+async function pushLocalState(baseRevision, { silent = false, force = false } = {}) {
+  const response = await fetch(SYNC_ENDPOINT, {
+    method: "PUT",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      state,
+      base_revision: Number(baseRevision || 0),
+      device_id: syncMeta.device_id,
+      client_updated_at: state.updated_at
+    })
+  });
+  const payload = await safeJson(response);
+  if (response.status === 409) {
+    setSyncConflict(payload);
+    showSyncConflictDialog(payload);
+    return false;
+  }
+  if (!response.ok) {
+    const error = new Error(payload.message || "Envoi impossible.");
+    error.status = response.status;
+    error.code = payload.error;
+    throw error;
+  }
+  syncMeta.remote_revision = Number(payload.revision || baseRevision + 1);
+  syncMeta.last_synced_at = payload.updated_at || new Date().toISOString();
+  syncMeta.dirty = false;
+  syncMeta.configured = true;
+  syncMeta.last_error = "";
+  persistSyncMeta();
+  pendingRemoteConflict = null;
+  if (!silent || force) toast("Données synchronisées");
+  return true;
+}
+
+function applyRemoteState(remote) {
+  state = migrateState(clone(remote.state));
+  currentSessionId = findNextSession()?.id || state.week.sessions[0]?.id || null;
+  activeExerciseId = null;
+  pendingImport = null;
+  syncMeta.remote_revision = Number(remote.revision || 0);
+  syncMeta.last_synced_at = remote.updated_at || new Date().toISOString();
+  syncMeta.dirty = false;
+  syncMeta.configured = true;
+  syncMeta.last_error = "";
+  persistSyncMeta();
+  hydrateReview();
+  renderAll();
+  renderSyncPanel();
+}
+
+function hasMeaningfulLocalData() {
+  if (state.week?.id && state.week.id !== DEMO_PROGRAM.week.id) return true;
+  if (Object.keys(state.daily_weights || {}).length) return true;
+  if ((state.history || []).length) return true;
+  if (Object.values(state.weekly_review || {}).some(value => String(value || "").trim())) return true;
+
+  return (state.week?.sessions || []).some(session => {
+    const result = state.session_results?.[session.id];
+    if (!result) return false;
+    if (result.status !== "planned" || result.weight_kg || result.energy_before || result.actual_duration_min || result.global_rpe || result.comment || result.completed_at || result.skipped_at || result.skip_reason) return true;
+    return session.exercises.some(exerciseData => {
+      const exerciseState = result.exercises?.[exerciseData.id];
+      if (!exerciseState) return false;
+      if (exerciseState.status !== "planned" || exerciseState.issues?.length || exerciseState.technique_flags?.length || exerciseState.pain?.area || exerciseState.pain?.intensity || exerciseState.pain?.continued || exerciseState.filmed || exerciseState.note || exerciseState.overall_rpe) return true;
+      return (exerciseState.sets || []).some((setData, index) => {
+        const planned = exerciseData.sets[index] || {};
+        return setData.completed || setData.rpe || numberOrBlank(setData.weight_kg) !== numberOrBlank(planned.weight_kg) || numberOrBlank(setData.reps) !== numberOrBlank(planned.reps);
+      });
+    });
+  });
+}
+
+function setSyncConflict(remote) {
+  pendingRemoteConflict = remote;
+  syncMeta.configured = true;
+  syncMeta.last_error = "SYNC_CONFLICT";
+  persistSyncMeta();
+  renderSyncPanel();
+}
+
+function showSyncConflictDialog(remote = pendingRemoteConflict) {
+  if (!remote) return;
+  const dialog = $("#syncConflictDialog");
+  const remoteDate = remote.updated_at ? formatDateTime(remote.updated_at) : "date inconnue";
+  const localDate = state.updated_at ? formatDateTime(state.updated_at) : "date inconnue";
+  $("#syncConflictText").textContent = `Version en ligne : ${remoteDate}. Version de cet appareil : ${localDate}. Aucune donnée ne sera écrasée sans ton choix.`;
+  if (!dialog.open) dialog.showModal();
+}
+
+function resolveConflictWithRemote() {
+  if (!pendingRemoteConflict) return;
+  applyRemoteState(pendingRemoteConflict);
+  $("#syncConflictDialog").close();
+  pendingRemoteConflict = null;
+  toast("Version en ligne utilisée");
+}
+
+async function resolveConflictWithLocal() {
+  if (!pendingRemoteConflict || syncInFlight) return;
+  const baseRevision = Number(pendingRemoteConflict.revision || 0);
+  $("#syncConflictDialog").close();
+  pendingRemoteConflict = null;
+  syncInFlight = true;
+  renderSyncPanel();
+  try {
+    await pushLocalState(baseRevision, { force: true });
+  } catch (error) {
+    handleSyncError(error, false);
+  } finally {
+    syncInFlight = false;
+    renderSyncPanel();
+  }
+}
+
+async function forcePushCurrentState() {
+  confirmAction("Envoyer cette version ?", "La version présente sur cet appareil remplacera la version en ligne.", async () => {
+    if (syncInFlight || !navigator.onLine) return;
+    syncInFlight = true;
+    renderSyncPanel();
+    try {
+      const remote = await fetchRemoteState();
+      await pushLocalState(remote.exists ? remote.revision : 0, { force: true });
+    } catch (error) {
+      handleSyncError(error, false);
+    } finally {
+      syncInFlight = false;
+      renderSyncPanel();
+    }
+  });
+}
+
+async function forcePullRemoteState() {
+  confirmAction("Récupérer la version en ligne ?", "La version locale sera remplacée. Télécharge une sauvegarde auparavant si nécessaire.", async () => {
+    if (syncInFlight || !navigator.onLine) return;
+    syncInFlight = true;
+    renderSyncPanel();
+    try {
+      const remote = await fetchRemoteState();
+      if (!remote.exists) {
+        toast("Aucune version en ligne");
+        return;
+      }
+      applyRemoteState(remote);
+      toast("Version en ligne récupérée");
+    } catch (error) {
+      handleSyncError(error, false);
+    } finally {
+      syncInFlight = false;
+      renderSyncPanel();
+    }
+  });
+}
+
+function handleSyncError(error, silent) {
+  syncMeta.last_error = error.code || error.message || "SYNC_FAILED";
+  if (error.status === 503 || error.code === "DB_NOT_CONFIGURED") syncMeta.configured = false;
+  persistSyncMeta();
+  if (!silent) toast(syncMeta.configured === false ? "Base Cloudflare à configurer" : "Synchronisation impossible");
+  console.warn("Synchronisation impossible", error);
+}
+
+async function safeJson(response) {
+  try { return await response.json(); }
+  catch { return {}; }
+}
+
 function allWeightEntries() {
   const entries = [];
   (state.history || []).forEach(snapshot => Object.entries(snapshot.daily_weights || {}).forEach(([date, value]) => {
@@ -1671,6 +2131,7 @@ function chevronDownIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"
 function calendarIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3m12-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></svg>`; }
 function cameraIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 10 4.5-2.5v9L15 14M4 6h11v12H4Z"/></svg>`; }
 function alertIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.4 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0Z"/></svg>`; }
+function scaleIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14a2 2 0 0 0 2-2V8a5 5 0 0 0-5-5H8a5 5 0 0 0-5 5v10a2 2 0 0 0 2 2Z"/><path d="M9 9a3 3 0 0 1 6 0M12 9l2-2"/></svg>`; }
 function trophyIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0V4Z"/><path d="M8 6H4v1a4 4 0 0 0 4 4m8-5h4v1a4 4 0 0 1-4 4M12 12v5m-4 3h8"/></svg>`; }
 
 function registerServiceWorker() {
