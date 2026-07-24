@@ -1,4 +1,4 @@
-# Coach Jérémy — v0.2
+# Coach Jérémy — v0.3
 
 Application web mobile de suivi sportif, sans framework et sans serveur.
 
@@ -29,7 +29,7 @@ Remplacer les fichiers du dépôt par ceux de cette version, puis effectuer :
 1. `Commit to main` dans GitHub Desktop ;
 2. `Push origin`.
 
-Cloudflare Pages republie automatiquement le site. Les données v0.1 déjà présentes dans le navigateur sont migrées vers le format v0.2 au premier chargement.
+Cloudflare Pages republie automatiquement le site. Les données v0.1 déjà présentes dans le navigateur sont migrées vers le format v0.3 au premier chargement.
 
 ## Mise en ligne Cloudflare Pages
 

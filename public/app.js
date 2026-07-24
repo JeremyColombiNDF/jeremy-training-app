@@ -3,7 +3,7 @@
 const STORAGE_KEY = "coach_jeremy_state_v2";
 const LEGACY_STORAGE_KEY = "coach_jeremy_state_v1";
 const APP_SCHEMA = "1.0";
-const APP_VERSION = "0.2";
+const APP_VERSION = "0.3";
 
 const STATUS_LABELS = {
   planned: "À faire",
@@ -629,6 +629,7 @@ function renderExerciseCard(session, exerciseData, index) {
   const checkedSets = result.sets.filter(setData => setData.completed).length;
   const isOpen = activeExerciseId === exerciseData.id;
   const issueText = buildIssueSummary(result);
+  const hasGuidance = Boolean(exerciseData.instructions || exerciseData.adaptation_rule);
   return `
     <article class="exercise-card ${isOpen ? "open" : ""} ${completed ? "completed" : ""} ${hasIssue ? "has-issue" : ""}" data-exercise-id="${escapeHtml(exerciseData.id)}">
       <button class="exercise-summary" type="button">
@@ -639,33 +640,36 @@ function renderExerciseCard(session, exerciseData, index) {
         <span class="exercise-state-icon">${completed ? checkIcon() : `<span class="exercise-chevron">${chevronDownIcon()}</span>`}</span>
       </button>
       <div class="exercise-body">
-        <div class="prescription">
-          <strong>Consigne</strong>
-          <p>${escapeHtml(exerciseData.instructions || "Aucune consigne spécifique.")}</p>
-          ${exerciseData.adaptation_rule ? `<p><strong>Adaptation :</strong> ${escapeHtml(exerciseData.adaptation_rule)}</p>` : ""}
-        </div>
-
-        <div class="exercise-rpe-block">
-          <span class="field-label">Difficulté de l’exercice (RPE)</span>
-          <div class="rpe-strip exercise-rpe" data-exercise-id="${escapeHtml(exerciseData.id)}">${rpeButtonsHtml(result.overall_rpe)}</div>
-        </div>
+        ${hasGuidance ? `
+        <details class="prescription-disclosure">
+          <summary><span>Consignes & adaptation</span><span class="disclosure-chevron">${chevronDownIcon()}</span></summary>
+          <div class="prescription-content">
+            ${exerciseData.instructions ? `<div><strong>Exécution</strong><p>${escapeHtml(exerciseData.instructions)}</p></div>` : ""}
+            ${exerciseData.adaptation_rule ? `<div><strong>Adaptation</strong><p>${escapeHtml(exerciseData.adaptation_rule)}</p></div>` : ""}
+          </div>
+        </details>` : ""}
 
         <div class="quick-actions">
-          <button class="conform-button" type="button">${checkIcon()} Tout est conforme</button>
-          <button class="problem-button ${hasIssue ? "active" : ""}" type="button">${alertIcon()} ${hasIssue ? "Problème renseigné" : "Signaler un problème"}</button>
+          <button class="conform-button" type="button">${checkIcon()} Conforme</button>
+          <button class="problem-button ${hasIssue ? "active" : ""}" type="button">${alertIcon()} ${hasIssue ? "Problème ajouté" : "Problème"}</button>
         </div>
         ${issueText ? `<div class="issue-summary">${escapeHtml(issueText)}</div>` : ""}
 
-        <label class="exercise-status-row"><span>Statut de l’exercice</span><select class="exercise-status-select">${EXERCISE_STATUSES.map(([value, label]) => `<option value="${value}" ${result.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <div class="exercise-rpe-block">
+          <span class="field-label">RPE de l’exercice</span>
+          <div class="rpe-strip exercise-rpe" data-exercise-id="${escapeHtml(exerciseData.id)}">${rpeButtonsHtml(result.overall_rpe)}</div>
+        </div>
 
-        <button class="sets-toggle" type="button"><span>Détail des séries</span><span>${checkedSets}/${result.sets.length} validées ${chevronDownIcon()}</span></button>
+        <label class="exercise-status-row"><span>Statut</span><select class="exercise-status-select">${EXERCISE_STATUSES.map(([value, label]) => `<option value="${value}" ${result.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+
+        <button class="sets-toggle" type="button"><span>Détail des séries</span><span>${checkedSets}/${result.sets.length} ${chevronDownIcon()}</span></button>
         <div class="sets-panel ${result.show_sets ? "open" : ""}">
           ${result.sets.map((actualSet, setIndex) => renderSetRow(exerciseData, actualSet, setIndex)).join("")}
           <button class="add-set" type="button">＋ Ajouter une série</button>
         </div>
 
         <div class="exercise-footer">
-          <label class="film-toggle"><input class="filmed-toggle" type="checkbox" ${result.filmed ? "checked" : ""}> ${cameraIcon()} ${exerciseData.film_requested ? "Série à filmer" : "Série filmée"}</label>
+          <label class="film-toggle"><input class="filmed-toggle" type="checkbox" ${result.filmed ? "checked" : ""}> ${cameraIcon()} ${exerciseData.film_requested ? "À filmer" : "Filmé"}</label>
           <button class="primary-button exercise-complete" type="button">${completed ? "Enregistrer" : "Valider"}</button>
         </div>
       </div>

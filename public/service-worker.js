@@ -1,4 +1,4 @@
-const CACHE = "coach-jeremy-v0.2";
+const CACHE = "coach-jeremy-v0.3";
 const ASSETS = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest", "icons/icon.svg"];
 
 self.addEventListener("install", event => {

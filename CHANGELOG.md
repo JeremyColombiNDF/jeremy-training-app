@@ -1,5 +1,18 @@
 # Historique des versions
 
+## v0.3 — 24 juillet 2026
+
+- Refonte mobile-first optimisée pour un iPhone 13 sous Chrome/iOS.
+- Suppression du bandeau global « Coach Jérémy » pour libérer la hauteur utile.
+- En-tête de séance compact sur fond clair avec progression et saisies regroupées.
+- Consignes d’exécution et règle d’adaptation repliées par défaut.
+- Actions « Conforme » et « Problème » compactes et réunies sur une ligne.
+- Navigation basse et chronomètre en matériau translucide inspiré des interfaces iOS.
+- Cartes, typographie, contrôles et feuilles modales harmonisés dans un style iOS contemporain.
+- Taille des champs adaptée pour éviter le zoom automatique d’iOS lors de la saisie.
+- Mise à jour du cache PWA afin de forcer la prise en compte de la nouvelle interface.
+
+
 ## v0.2 — 24 juillet 2026
 
 - Nouvelle carte `Séance du jour` sur l'accueil.

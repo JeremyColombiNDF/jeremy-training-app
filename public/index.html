@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#121a2b">
+  <meta name="theme-color" content="#f2f2f7">
   <meta name="description" content="Carnet d'entraînement personnel de Jérémy">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -78,7 +78,7 @@
     <section id="sessionView" class="view" aria-labelledby="sessionTitle">
       <button id="backToWeek" class="back-button" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-        Accueil
+        Semaine
       </button>
 
       <article class="session-header-card">
@@ -238,7 +238,7 @@
       <article class="card muted-card version-card">
         <div>
           <p class="section-kicker">VERSION</p>
-          <h3>Coach Jérémy v0.2</h3>
+          <h3>Coach Jérémy v0.3</h3>
         </div>
         <p class="small muted">Données locales, historique intégré, aucun envoi automatique sur Internet.</p>
       </article>
@@ -283,7 +283,7 @@
       <div class="dialog-handle"></div>
       <div class="dialog-head">
         <div><p class="section-kicker">EXÉCUTION</p><h3>Signaler un problème</h3></div>
-        <button id="closeIssueDialog" type="button" class="close-dialog" aria-label="Fermer">×</button>
+        <button value="cancel" class="close-dialog" aria-label="Fermer">×</button>
       </div>
       <div id="issueChoices" class="tag-selector issue-grid"></div>
       <div id="painFields" class="conditional-fields hidden">

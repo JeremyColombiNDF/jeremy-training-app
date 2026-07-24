@@ -1,4 +1,4 @@
-# Guide utilisateur — version 0.2
+# Guide utilisateur — version 0.3
 
 ## Démarrer la séance
 
