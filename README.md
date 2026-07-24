@@ -1,10 +1,10 @@
-# Coach Jérémy — v0.3
+# Coach Jérémy — v0.4
 
 Application web mobile de suivi sportif, sans framework et sans serveur.
 
 ## Fonctionnalités
 
-- carte automatique de la séance du jour ;
+- séances ordonnées en Jour 1, Jour 2, etc., avec le jour calendaire uniquement comme suggestion ;
 - reprise immédiate d'une séance en cours ;
 - poids quotidien, moyenne des sept dernières pesées et tendance ;
 - validation rapide d'un exercice conforme ;
@@ -19,6 +19,9 @@ Application web mobile de suivi sportif, sans framework et sans serveur.
 - aperçu du programme avant import ;
 - archivage automatique de la semaine remplacée ;
 - historique consultable et exportable ;
+- records de charge par exercice avec répétitions et date ;
+- possibilité de clôturer une séance non réalisée en documentant la cause ;
+- réinitialisation de l’avancement sans supprimer la structure du programme ;
 - sauvegarde / restauration complète ;
 - installation possible en PWA.
 
@@ -29,7 +32,7 @@ Remplacer les fichiers du dépôt par ceux de cette version, puis effectuer :
 1. `Commit to main` dans GitHub Desktop ;
 2. `Push origin`.
 
-Cloudflare Pages republie automatiquement le site. Les données v0.1 déjà présentes dans le navigateur sont migrées vers le format v0.3 au premier chargement.
+Cloudflare Pages republie automatiquement le site. Les données v0.1 déjà présentes dans le navigateur sont migrées vers le format v0.4 au premier chargement.
 
 ## Mise en ligne Cloudflare Pages
 

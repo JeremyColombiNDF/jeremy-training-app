@@ -52,3 +52,14 @@ L'ancienne semaine reste disponible dans `Historique`.
 ## Sauvegarde
 
 Les données sont locales au navigateur. Télécharger régulièrement une sauvegarde depuis `Données`, notamment avant de vider les données du navigateur ou de changer de téléphone.
+
+
+## Ordre et dates des séances
+
+Les cartes sont toujours affichées en `Jour 1`, `Jour 2`, etc. Le jour de semaine indiqué par ChatGPT est uniquement une suggestion. La date de réalisation est figée au moment où vous appuyez sur **Terminer la séance**.
+
+Si une séance ne sera pas effectuée, utilisez **Je ne fais pas cette séance** et précisez la cause. Cette information sera incluse dans l’export ChatGPT.
+
+Le bouton **Réinitialiser** conserve le programme et l’historique ; il efface seulement les validations, les saisies et les pesées de la semaine courante.
+
+L’onglet **Historique > Records** affiche la charge la plus lourde validée pour chaque exercice, le nombre de répétitions et la date.

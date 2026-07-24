@@ -1,5 +1,15 @@
 # Historique des versions
 
+## v0.4 — 24 juillet 2026
+
+- Les séances sont désormais présentées en Jour 1, Jour 2, etc. ; le jour de la semaine n’est plus qu’une suggestion.
+- La date réelle est enregistrée uniquement lors de la validation de la séance.
+- Ajout d’une clôture « séance non réalisée » avec cause obligatoire dans le bilan exporté.
+- Le bouton Réinitialiser efface uniquement l’avancement et les saisies de la semaine courante, sans toucher au programme ni à l’historique.
+- Ajout d’un onglet Records dans l’historique : charge maximale, répétitions et date par exercice.
+- Refonte visuelle inspirée du langage Liquid Glass d’iOS 26 : bleu système, surfaces neutres, verre translucide et couleur d’accent plus parcimonieuse.
+- Mise à jour de l’icône et du cache PWA.
+
 ## v0.3 — 24 juillet 2026
 
 - Refonte mobile-first optimisée pour un iPhone 13 sous Chrome/iOS.

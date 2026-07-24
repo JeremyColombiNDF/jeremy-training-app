@@ -3,12 +3,13 @@
 const STORAGE_KEY = "coach_jeremy_state_v2";
 const LEGACY_STORAGE_KEY = "coach_jeremy_state_v1";
 const APP_SCHEMA = "1.0";
-const APP_VERSION = "0.3";
+const APP_VERSION = "0.4";
 
 const STATUS_LABELS = {
   planned: "À faire",
   in_progress: "En cours",
-  done: "Terminée"
+  done: "Terminée",
+  skipped: "Non réalisée"
 };
 
 const EXERCISE_STATUSES = [
@@ -219,7 +220,7 @@ function makeInitialState(program = DEMO_PROGRAM, history = []) {
 }
 
 let state = loadState();
-let currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+let currentSessionId = findNextSession()?.id || state.week.sessions[0]?.id || null;
 let activeExerciseId = null;
 let currentViewId = "weekView";
 let deferredInstallPrompt = null;
@@ -258,6 +259,9 @@ function migrateState(parsed) {
   migrated.week.sessions.forEach(session => {
     const sr = migrated.session_results[session.id];
     if (!sr) return;
+    sr.completed_at = sr.completed_at || (sr.status === "done" ? parsed.updated_at || "" : "");
+    sr.skipped_at = sr.skipped_at || "";
+    sr.skip_reason = sr.skip_reason || "";
     sr.exercises = sr.exercises || {};
     session.exercises.forEach(exerciseData => {
       const er = sr.exercises[exerciseData.id];
@@ -298,6 +302,9 @@ function sessionResult(sessionId, targetState = state) {
       actual_duration_min: "",
       global_rpe: "",
       comment: "",
+      completed_at: "",
+      skipped_at: "",
+      skip_reason: "",
       exercises: {}
     };
   }
@@ -340,13 +347,14 @@ function init() {
 
 function bindStaticEvents() {
   $$(".nav-item").forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
+  $$(".history-tab").forEach(button => button.addEventListener("click", () => showHistoryPanel(button.dataset.historyPanel)));
   $("#backToWeek").addEventListener("click", () => showView("weekView"));
 
   $("#dailyWeight").addEventListener("change", event => {
     const value = numberOrBlank(event.target.value);
     if (value === "") delete state.daily_weights[todayKey()];
     else state.daily_weights[todayKey()] = value;
-    const todaySession = findTodaySession();
+    const todaySession = findNextSession();
     if (todaySession && value !== "" && !sessionResult(todaySession.id).weight_kg) sessionResult(todaySession.id).weight_kg = value;
     saveState();
     renderWeightTrend();
@@ -362,6 +370,8 @@ function bindStaticEvents() {
   $("#actualDuration").addEventListener("change", event => updateSessionField("actual_duration_min", numberOrBlank(event.target.value)));
   $("#sessionComment").addEventListener("input", debounce(event => updateSessionField("comment", event.target.value), 250));
   $("#completeSessionBtn").addEventListener("click", completeCurrentSession);
+  $("#skipSessionBtn").addEventListener("click", openSkipSessionDialog);
+  $("#skipSessionForm").addEventListener("submit", confirmSkipCurrentSession);
 
   ["Steps", "Cardio", "Events", "Feeling"].forEach(name => {
     const element = $(`#review${name}`);
@@ -380,17 +390,21 @@ function bindStaticEvents() {
   $("#backupBtn").addEventListener("click", downloadBackup);
   $("#restoreInput").addEventListener("change", restoreBackup);
   $("#resetDemoBtn").addEventListener("click", () => confirmAction(
-    "Tout réinitialiser ?",
-    "La semaine actuelle, les saisies et l’historique local seront supprimés.",
+    "Réinitialiser l’avancement ?",
+    "Le programme et l’historique seront conservés. Seules les saisies, pesées et validations de la semaine actuelle seront effacées.",
     () => {
-      state = makeInitialState();
-      currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+      state.daily_weights = {};
+      state.session_results = {};
+      state.weekly_review = emptyWeeklyReview();
+      currentSessionId = state.week.sessions[0]?.id || null;
       activeExerciseId = null;
       pendingImport = null;
+      stopTimer();
       saveState();
       hydrateReview();
       renderAll();
-      toast("Application réinitialisée");
+      showView("weekView");
+      toast("Avancement de la semaine réinitialisé");
     }
   ));
 
@@ -459,7 +473,8 @@ function showView(viewId) {
   $$(".nav-item").forEach(button => button.classList.toggle("active", button.dataset.view === viewId));
   const titles = { weekView: "Accueil", sessionView: "Ma séance", historyView: "Historique", reviewView: "Bilan", dataView: "Mes données" };
   $("#pageTitle").textContent = titles[viewId] || "Coach Jérémy";
-  $("#trainingDock").classList.toggle("hidden", viewId !== "sessionView");
+  const activeSessionClosed = currentSessionId ? ["done", "skipped"].includes(sessionResult(currentSessionId).status) : true;
+  $("#trainingDock").classList.toggle("hidden", viewId !== "sessionView" || activeSessionClosed);
   if (viewId === "weekView") renderWeek();
   if (viewId === "sessionView") renderSession(currentSessionId);
   if (viewId === "historyView") renderHistory();
@@ -504,13 +519,18 @@ function renderWeek() {
     const result = sessionResult(session.id);
     const doneExercises = session.exercises.filter(ex => FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status)).length;
     const pct = session.exercises.length ? Math.round(doneExercises / session.exercises.length * 100) : 0;
-    const cardClass = result.status === "done" ? "done" : result.status === "in_progress" ? "progress" : "";
+    const cardClass = result.status === "done" ? "done" : result.status === "skipped" ? "skipped" : result.status === "in_progress" ? "progress" : "";
+    const dateText = result.status === "done" && result.completed_at
+      ? `Réalisée ${formatCompactDate(result.completed_at)}`
+      : result.status === "skipped" && result.skipped_at
+        ? `Non réalisée ${formatCompactDate(result.skipped_at)}`
+        : sessionSuggestionText(session);
     return `
       <button class="session-card ${cardClass} open-session" type="button" data-session-id="${escapeHtml(session.id)}">
         <div class="session-card-main">
-          <span class="session-index">${result.status === "done" ? checkIcon() : index + 1}</span>
+          <span class="session-index">${result.status === "done" ? checkIcon() : result.status === "skipped" ? "—" : index + 1}</span>
           <div class="session-card-copy">
-            <p class="session-day">${escapeHtml(session.day || `Séance ${index + 1}`)}</p>
+            <p class="session-day">Jour ${index + 1}</p>
             <h3>${escapeHtml(session.title)}</h3>
           </div>
           <span class="session-card-go">${chevronRightIcon()}</span>
@@ -520,7 +540,7 @@ function renderWeek() {
           <span>•</span>
           <span>${doneExercises}/${session.exercises.length} exercices</span>
           <span>•</span>
-          <span>${STATUS_LABELS[result.status] || "À faire"}</span>
+          <span>${escapeHtml(dateText || STATUS_LABELS[result.status] || "À faire")}</span>
         </div>
         <div class="mini-progress"><span style="width:${pct}%"></span></div>
       </button>`;
@@ -531,21 +551,24 @@ function renderWeek() {
 }
 
 function renderTodayCard() {
-  const session = findTodaySession();
+  const session = findNextSession();
   const container = $("#todayCard");
   if (!session) {
-    container.innerHTML = `<article class="today-rest"><p class="section-kicker">AUJOURD’HUI</p><h2>Repos ou récupération</h2><p class="muted">Aucune séance n’est prévue aujourd’hui. La prochaine reste accessible ci-dessous.</p></article>`;
+    container.innerHTML = `<article class="today-rest"><p class="section-kicker">SEMAINE CLÔTURÉE</p><h2>Toutes les séances sont traitées</h2><p class="muted">Tu peux compléter le bilan puis exporter la semaine vers ChatGPT.</p></article>`;
     return;
   }
+  const index = state.week.sessions.findIndex(item => item.id === session.id);
   const result = sessionResult(session.id);
   const done = session.exercises.filter(ex => FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status)).length;
+  const suggestion = sessionSuggestionText(session);
   container.innerHTML = `
     <article class="today-session">
-      <div class="today-label">${calendarIcon()} Séance du jour</div>
+      <div class="today-label">${calendarIcon()} Prochaine séance</div>
+      <div class="today-title-line"><span>Jour ${index + 1}</span>${suggestion ? `<small>${escapeHtml(suggestion)}</small>` : ""}</div>
       <h2>${escapeHtml(session.title)}</h2>
       <p>${escapeHtml(session.goal || "")}</p>
       <div class="today-meta"><span>${session.estimated_duration_min || "—"} min</span><span>${session.exercises.length} exercices</span><span>${done}/${session.exercises.length} validés</span></div>
-      <button class="light-button start-today" type="button">${result.status === "done" ? "Revoir la séance" : result.status === "in_progress" ? "Reprendre la séance" : "Commencer la séance"}</button>
+      <button class="primary-button start-today" type="button">${result.status === "in_progress" ? "Reprendre la séance" : "Commencer la séance"}</button>
     </article>`;
   container.querySelector(".start-today").addEventListener("click", () => openSession(session.id));
 }
@@ -596,14 +619,25 @@ function renderSession(sessionId) {
     activeExerciseId = session.exercises.find(ex => !FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, ex).status))?.id || session.exercises[0]?.id || null;
   }
 
-  $("#sessionDay").textContent = session.day || "Séance";
+  const sessionIndex = state.week.sessions.findIndex(item => item.id === session.id);
+  $("#sessionDay").textContent = sessionHeaderLabel(session, sessionIndex);
   $("#sessionTitle").textContent = session.title;
   $("#sessionGoal").textContent = session.goal || "";
   $("#sessionStatusPill").textContent = STATUS_LABELS[result.status] || "À faire";
   $("#sessionWeight").value = result.weight_kg || state.daily_weights[todayKey()] || "";
   $("#actualDuration").value = result.actual_duration_min || "";
   $("#sessionComment").value = result.comment || "";
-  $("#completeSessionBtn").textContent = result.status === "done" ? "Séance terminée ✓" : "Terminer la séance";
+  $("#completeSessionBtn").textContent = result.status === "done" ? "Séance terminée ✓" : result.status === "skipped" ? "Séance non réalisée" : "Terminer la séance";
+  $("#completeSessionBtn").disabled = result.status === "skipped";
+  $("#skipSessionBtn").classList.toggle("hidden", result.status === "done" || result.status === "skipped");
+  const completionMeta = $("#sessionCompletionMeta");
+  const completionText = result.status === "done" && result.completed_at
+    ? `Réalisée le ${formatDateTime(result.completed_at)}`
+    : result.status === "skipped" && result.skipped_at
+      ? `Non réalisée le ${formatDateTime(result.skipped_at)}${result.skip_reason ? ` · ${result.skip_reason}` : ""}`
+      : "";
+  completionMeta.textContent = completionText;
+  completionMeta.classList.toggle("hidden", !completionText);
 
   renderRatingButtons($("#sessionEnergy"), range(1, 10), result.energy_before, value => updateSessionField("energy_before", value));
   renderRpeButtons($("#sessionRpe"), result.global_rpe, value => updateSessionField("global_rpe", value));
@@ -839,6 +873,9 @@ function completeCurrentSession() {
   if (!session) return;
   const result = sessionResult(currentSessionId);
   result.status = "done";
+  if (!result.completed_at) result.completed_at = new Date().toISOString();
+  result.skipped_at = "";
+  result.skip_reason = "";
   session.exercises.forEach(exerciseData => {
     const exResult = exerciseResult(currentSessionId, exerciseData);
     if (exResult.status === "planned") {
@@ -847,10 +884,60 @@ function completeCurrentSession() {
     }
   });
   stopTimer();
+  $("#trainingDock").classList.add("hidden");
   saveState();
   renderSession(currentSessionId);
   renderWeek();
+  renderHistory();
   toast("Séance terminée");
+}
+
+function openSkipSessionDialog() {
+  const result = sessionResult(currentSessionId);
+  if (["done", "skipped"].includes(result.status)) return;
+  $("#skipSessionForm").reset();
+  $("#skipReasonNote").value = "";
+  $("#skipSessionDialog").showModal();
+}
+
+function confirmSkipCurrentSession(event) {
+  event.preventDefault();
+  const selected = $("#skipReasonChoices input:checked")?.value || "";
+  const note = $("#skipReasonNote").value.trim();
+  if (!selected && !note) {
+    toast("Indique la raison de la séance non réalisée");
+    return;
+  }
+  const session = state.week.sessions.find(item => item.id === currentSessionId);
+  if (!session) return;
+  const result = sessionResult(currentSessionId);
+  result.status = "skipped";
+  result.completed_at = "";
+  result.skipped_at = new Date().toISOString();
+  result.skip_reason = [selected, note].filter(Boolean).join(" — ");
+  session.exercises.forEach(exerciseData => {
+    const exResult = exerciseResult(currentSessionId, exerciseData);
+    if (exResult.status === "planned") exResult.status = "skipped";
+  });
+  $("#skipSessionDialog").close();
+  stopTimer();
+  $("#trainingDock").classList.add("hidden");
+  saveState();
+  renderSession(currentSessionId);
+  renderWeek();
+  renderHistory();
+  toast("Séance notée comme non réalisée");
+}
+
+function sessionSuggestionText(session) {
+  const value = String(session?.day || "").trim();
+  if (!value || /^jour\s*\d+/i.test(value) || /^séance\s*\d+/i.test(value)) return "";
+  return `Suggestion : ${value}`;
+}
+
+function sessionHeaderLabel(session, index) {
+  const suggestion = sessionSuggestionText(session);
+  return `Jour ${index + 1}${suggestion ? ` · ${suggestion}` : ""}`;
 }
 
 function renderRatingButtons(container, values, selected, onSelect, suffix = "") {
@@ -896,10 +983,10 @@ function updateReview(field, value) {
 function renderReviewSummary() {
   const metrics = calculateMetrics(state);
   $("#reviewAutoSummary").innerHTML = `
-    <div class="summary-tile"><strong>${metrics.doneSessions}/${metrics.totalSessions}</strong><span>séances terminées</span></div>
+    <div class="summary-tile"><strong>${metrics.doneSessions}/${metrics.totalSessions}</strong><span>séances réalisées</span></div>
+    <div class="summary-tile"><strong>${metrics.skippedSessions}</strong><span>séance${metrics.skippedSessions > 1 ? "s" : ""} non réalisée${metrics.skippedSessions > 1 ? "s" : ""}</span></div>
     <div class="summary-tile"><strong>${metrics.setCompletion}%</strong><span>séries validées</span></div>
-    <div class="summary-tile"><strong>${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "—"}</strong><span>RPE moyen</span></div>
-    <div class="summary-tile"><strong>${metrics.issueCount}</strong><span>problème${metrics.issueCount > 1 ? "s" : ""} signalé${metrics.issueCount > 1 ? "s" : ""}</span></div>`;
+    <div class="summary-tile"><strong>${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "—"}</strong><span>RPE moyen</span></div>`;
 }
 
 function refreshReportPreview() {
@@ -919,7 +1006,7 @@ function renderHistory() {
       <p class="section-kicker light">VUE D’ENSEMBLE</p>
       <h3>${totalWeeks} semaine${totalWeeks > 1 ? "s" : ""} suivie${totalWeeks > 1 ? "s" : ""}</h3>
       <div class="history-stats">
-        <div><strong>${totalSessions}</strong><span>séances terminées</span></div>
+        <div><strong>${totalSessions}</strong><span>séances réalisées</span></div>
         <div><strong>${archived.length}</strong><span>semaines archivées</span></div>
         <div><strong>${latestWeight ? `${latestWeight.toFixed(1)} kg` : "—"}</strong><span>dernière pesée</span></div>
       </div>
@@ -927,34 +1014,107 @@ function renderHistory() {
 
   if (!archived.length) {
     $("#historyList").innerHTML = `<div class="empty-state"><strong>Aucune semaine archivée</strong><br><span class="small">La première apparaîtra ici lors de l’import du prochain programme.</span></div>`;
+  } else {
+    $("#historyList").innerHTML = [...archived].reverse().map((snapshot, reverseIndex) => {
+      const index = archived.length - 1 - reverseIndex;
+      const metrics = calculateMetrics(snapshot);
+      return `
+        <details class="history-card">
+          <summary>
+            <div><p class="session-day">${escapeHtml(snapshot.week.block_name || "Bloc")}</p><h3>${escapeHtml(snapshot.week.title || `Semaine ${snapshot.week.number}`)}</h3><p class="muted small">Archivée le ${formatDate(snapshot.archived_at)}</p></div>
+            <span>${chevronDownIcon()}</span>
+          </summary>
+          <div class="history-body">
+            <div class="history-metrics">
+              <div><strong>${metrics.doneSessions}/${metrics.totalSessions}</strong><span>réalisées</span></div>
+              <div><strong>${metrics.skippedSessions}</strong><span>non réalisées</span></div>
+              <div><strong>${metrics.avgWeight ? `${metrics.avgWeight.toFixed(1)} kg` : "—"}</strong><span>poids moyen</span></div>
+              <div><strong>${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "—"}</strong><span>RPE moyen</span></div>
+            </div>
+            <button class="secondary-button full-button download-history" type="button" data-history-index="${index}">Télécharger le bilan</button>
+          </div>
+        </details>`;
+    }).join("");
+    $$(".download-history").forEach(button => button.addEventListener("click", event => {
+      event.preventDefault();
+      const snapshot = state.history[Number(button.dataset.historyIndex)];
+      downloadText(`bilan-semaine-${snapshot.week.number || "archive"}.txt`, generateReport(snapshot), "text/plain;charset=utf-8");
+    }));
+  }
+  renderRecords();
+}
+
+function showHistoryPanel(panel) {
+  const records = panel === "records";
+  $("#historyWeeksPanel").classList.toggle("hidden", records);
+  $("#historyRecordsPanel").classList.toggle("hidden", !records);
+  $$(".history-tab").forEach(button => {
+    const active = button.dataset.historyPanel === panel;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  if (records) renderRecords();
+}
+
+function renderRecords() {
+  const records = calculateExerciseRecords();
+  $("#recordsOverview").innerHTML = `
+    <article class="records-hero">
+      <div>
+        <p class="section-kicker">RECORDS DE CHARGE</p>
+        <h3>${records.length} exercice${records.length > 1 ? "s" : ""} suivi${records.length > 1 ? "s" : ""}</h3>
+        <p>La charge la plus lourde validée, avec les répétitions et la date de la séance.</p>
+      </div>
+      <span class="records-medal">${trophyIcon()}</span>
+    </article>`;
+  if (!records.length) {
+    $("#recordsList").innerHTML = `<div class="empty-state"><strong>Aucun record enregistré</strong><br><span class="small">Un record apparaît après validation d’une séance comportant une charge.</span></div>`;
     return;
   }
+  $("#recordsList").innerHTML = records.map(record => `
+    <article class="record-card">
+      <div class="record-copy">
+        <h3>${escapeHtml(record.name)}</h3>
+        <p>${record.reps} rep${record.reps > 1 ? "s" : ""} · ${escapeHtml(record.sessionLabel)}</p>
+      </div>
+      <div class="record-value">
+        <strong>${record.weight.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}</strong><span>kg</span>
+        <small>${formatCompactDate(record.date)}</small>
+      </div>
+    </article>`).join("");
+}
 
-  $("#historyList").innerHTML = [...archived].reverse().map((snapshot, reverseIndex) => {
-    const index = archived.length - 1 - reverseIndex;
-    const metrics = calculateMetrics(snapshot);
-    return `
-      <details class="history-card">
-        <summary>
-          <div><p class="session-day">${escapeHtml(snapshot.week.block_name || "Bloc")}</p><h3>${escapeHtml(snapshot.week.title || `Semaine ${snapshot.week.number}`)}</h3><p class="muted small">Archivée le ${formatDate(snapshot.archived_at)}</p></div>
-          <span>${chevronDownIcon()}</span>
-        </summary>
-        <div class="history-body">
-          <div class="history-metrics">
-            <div><strong>${metrics.doneSessions}/${metrics.totalSessions}</strong><span>séances</span></div>
-            <div><strong>${metrics.setCompletion}%</strong><span>séries validées</span></div>
-            <div><strong>${metrics.avgWeight ? `${metrics.avgWeight.toFixed(1)} kg` : "—"}</strong><span>poids moyen</span></div>
-            <div><strong>${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "—"}</strong><span>RPE moyen</span></div>
-          </div>
-          <button class="secondary-button full-button download-history" type="button" data-history-index="${index}">Télécharger le bilan</button>
-        </div>
-      </details>`;
-  }).join("");
-  $$(".download-history").forEach(button => button.addEventListener("click", event => {
-    event.preventDefault();
-    const snapshot = state.history[Number(button.dataset.historyIndex)];
-    downloadText(`bilan-semaine-${snapshot.week.number || "archive"}.txt`, generateReport(snapshot), "text/plain;charset=utf-8");
-  }));
+function calculateExerciseRecords() {
+  const snapshots = [...(state.history || []), snapshotCurrent(false)];
+  const records = new Map();
+  snapshots.forEach(snapshot => {
+    (snapshot.week?.sessions || []).forEach((session, sessionIndex) => {
+      const sr = sessionResult(session.id, snapshot);
+      if (sr.status !== "done") return;
+      const date = sr.completed_at || snapshot.archived_at || "";
+      session.exercises.forEach(exerciseData => {
+        const er = exerciseResult(session.id, exerciseData, snapshot);
+        er.sets.forEach(setData => {
+          const weight = Number(setData.weight_kg);
+          const reps = Number(setData.reps);
+          if (!setData.completed || !Number.isFinite(weight) || weight <= 0 || !Number.isFinite(reps) || reps <= 0) return;
+          const key = normalizeText(exerciseData.name);
+          const candidate = {
+            name: exerciseData.name,
+            weight,
+            reps,
+            date,
+            sessionLabel: `Jour ${sessionIndex + 1} · ${session.title}`
+          };
+          const current = records.get(key);
+          if (!current || weight > current.weight || (weight === current.weight && reps > current.reps) || (weight === current.weight && reps === current.reps && String(date) > String(current.date))) {
+            records.set(key, candidate);
+          }
+        });
+      });
+    });
+  });
+  return [...records.values()].sort((a, b) => a.name.localeCompare(b.name, "fr"));
 }
 
 function calculateMetrics(targetState) {
@@ -981,9 +1141,11 @@ function calculateMetrics(targetState) {
   });
   const weights = Object.values(targetState.daily_weights || {}).map(Number).filter(Number.isFinite);
   const doneSessions = sessions.filter(session => sessionResult(session.id, targetState).status === "done").length;
+  const skippedSessions = sessions.filter(session => sessionResult(session.id, targetState).status === "skipped").length;
   return {
     totalSessions: sessions.length,
     doneSessions,
+    skippedSessions,
     totalExercises,
     doneExercises,
     plannedSets,
@@ -1023,9 +1185,13 @@ function generateReport(targetState = state) {
     }).join("\n\n");
 
     return [
-      `SÉANCE ${index + 1} — ${session.day} — ${session.title}`,
+      `SÉANCE ${index + 1} — JOUR ${index + 1} — ${session.title}`,
+      `Jour suggéré : ${sessionSuggestionText(session) || "aucun"}`,
       `Objectif : ${session.goal || "—"}`,
       `Statut : ${STATUS_LABELS[result.status] || result.status}`,
+      `Date de réalisation : ${result.completed_at ? formatDateTime(result.completed_at) : "non réalisée"}`,
+      `Date de clôture sans réalisation : ${result.skipped_at ? formatDateTime(result.skipped_at) : "—"}`,
+      `Cause de non-réalisation : ${result.skip_reason || "—"}`,
       `Poids : ${result.weight_kg ? `${result.weight_kg} kg` : "non renseigné"}`,
       `Énergie avant : ${result.energy_before ? `${result.energy_before}/10` : "non renseignée"}`,
       `Durée réelle : ${result.actual_duration_min ? `${result.actual_duration_min} min` : "non renseignée"}`,
@@ -1056,7 +1222,8 @@ SEMAINE
 - Titre : ${targetState.week.title || "—"}
 - Objectif : ${targetState.week.objective || "—"}
 - Début : ${targetState.week.start_date || "—"}
-- Séances terminées : ${metrics.doneSessions}/${metrics.totalSessions}
+- Séances réalisées : ${metrics.doneSessions}/${metrics.totalSessions}
+- Séances non réalisées : ${metrics.skippedSessions}
 - Séries validées : ${metrics.completedSets}/${metrics.plannedSets} (${metrics.setCompletion} %)
 - RPE moyen : ${metrics.avgRpe ? metrics.avgRpe.toFixed(1) : "non calculable"}
 - Problèmes signalés : ${metrics.issueCount}
@@ -1120,7 +1287,7 @@ function previewImport() {
     preview.innerHTML = `
       <strong>${escapeHtml(pendingImport.week.title || `Semaine ${pendingImport.week.number}`)}</strong>
       <p class="small">${pendingImport.week.sessions.length} séances · ${totalExercises} exercices · ${formatDuration(totalMinutes)}</p>
-      <div class="import-session-list">${pendingImport.week.sessions.map(session => `<span><b>${escapeHtml(session.day || "Séance")}</b><em>${escapeHtml(session.title)}</em></span>`).join("")}</div>
+      <div class="import-session-list">${pendingImport.week.sessions.map((session, index) => `<span><b>Jour ${index + 1}</b><em>${escapeHtml(session.title)}${sessionSuggestionText(session) ? ` · ${escapeHtml(sessionSuggestionText(session))}` : ""}</em></span>`).join("")}</div>
       <button id="confirmImportBtn" class="primary-button full-button" type="button">Archiver la semaine actuelle et importer</button>`;
     $("#confirmImportBtn").addEventListener("click", confirmImport);
   } catch (error) {
@@ -1143,7 +1310,7 @@ function confirmImport() {
       const preservedProfile = pendingImport.athlete_profile || state.athlete_profile;
       state = makeInitialState(pendingImport, history);
       state.athlete_profile = preservedProfile;
-      currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+      currentSessionId = findNextSession()?.id || state.week.sessions[0]?.id || null;
       activeExerciseId = null;
       pendingImport = null;
       saveState();
@@ -1212,7 +1379,7 @@ function restoreBackup(event) {
       const parsed = JSON.parse(reader.result);
       if (!parsed.week?.sessions) throw new Error("format inconnu");
       state = migrateState(parsed);
-      currentSessionId = findTodaySession()?.id || state.week.sessions[0]?.id || null;
+      currentSessionId = findNextSession()?.id || state.week.sessions[0]?.id || null;
       activeExerciseId = null;
       saveState();
       hydrateReview();
@@ -1270,10 +1437,10 @@ function findInProgressSession() {
   return state.week.sessions.find(session => sessionResult(session.id).status === "in_progress");
 }
 
-function findTodaySession() {
-  const day = DAY_NAMES[new Date().getDay()];
-  const exact = state.week.sessions.find(session => normalizeText(session.day).startsWith(normalizeText(day)));
-  return exact || findInProgressSession() || state.week.sessions.find(session => sessionResult(session.id).status !== "done") || state.week.sessions[0];
+function findNextSession() {
+  return findInProgressSession()
+    || state.week.sessions.find(session => !["done", "skipped"].includes(sessionResult(session.id).status))
+    || null;
 }
 
 function updateDockNavigation(session) {
@@ -1417,6 +1584,16 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
 }
 
+function formatCompactDate(value) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" }).format(new Date(value));
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
 function formatDuration(minutes) {
   if (!minutes) return "durée non renseignée";
   const hours = Math.floor(minutes / 60);
@@ -1494,6 +1671,7 @@ function chevronDownIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"
 function calendarIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3m12-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></svg>`; }
 function cameraIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 10 4.5-2.5v9L15 14M4 6h11v12H4Z"/></svg>`; }
 function alertIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.4 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0Z"/></svg>`; }
+function trophyIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0V4Z"/><path d="M8 6H4v1a4 4 0 0 0 4 4m8-5h4v1a4 4 0 0 1-4 4M12 12v5m-4 3h8"/></svg>`; }
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {

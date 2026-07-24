@@ -32,7 +32,7 @@ SPORT_APP_IMPORT_END
     "start_date": "2026-08-03",
     "sessions": [
       {
-        "id": "week-2-monday-upper",
+        "id": "week-2-session-1",
         "day": "Lundi",
         "title": "Upper force",
         "goal": "Objectif de la séance",
@@ -66,6 +66,9 @@ SPORT_APP_IMPORT_END
 
 ## Règles strictes
 
+- Les séances sont affichées par ordre dans le tableau : `Jour 1`, `Jour 2`, etc. Le nombre de séances est libre (5, 6 ou autre).
+- Le champ `day` est facultatif dans son sens métier : il sert uniquement de suggestion calendaire (`Lundi`, `Mardi`, etc.). Il ne fixe jamais la date réelle de réalisation.
+- La date réelle est enregistrée par l’application lorsque l’utilisateur valide la séance ; elle ne doit pas être fournie par ChatGPT.
 - Tous les identifiants `id` doivent être uniques dans la semaine.
 - `weight_kg` est un nombre ou `null` pour le poids du corps / un exercice sans charge renseignée.
 - Chaque série est listée individuellement dans `sets`.

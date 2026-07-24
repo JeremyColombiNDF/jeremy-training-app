@@ -133,7 +133,9 @@
           <span>Commentaire général</span>
           <textarea id="sessionComment" rows="3" placeholder="Sensations, fatigue ou point à retenir..."></textarea>
         </label>
+        <p id="sessionCompletionMeta" class="session-completion-meta hidden"></p>
         <button id="completeSessionBtn" class="primary-button full-button" type="button">Terminer la séance</button>
+        <button id="skipSessionBtn" class="skip-session-button" type="button">Je ne fais pas cette séance</button>
       </article>
     </section>
 
@@ -144,8 +146,18 @@
           <h2 id="historyTitle">Historique</h2>
         </div>
       </div>
-      <article id="historyOverview" class="history-overview"></article>
-      <div id="historyList" class="history-list"></div>
+      <div class="history-segmented" role="tablist" aria-label="Type d’historique">
+        <button class="history-tab active" type="button" data-history-panel="weeks" role="tab" aria-selected="true">Semaines</button>
+        <button class="history-tab" type="button" data-history-panel="records" role="tab" aria-selected="false">Records</button>
+      </div>
+      <div id="historyWeeksPanel">
+        <article id="historyOverview" class="history-overview"></article>
+        <div id="historyList" class="history-list"></div>
+      </div>
+      <div id="historyRecordsPanel" class="hidden">
+        <article id="recordsOverview" class="records-overview"></article>
+        <div id="recordsList" class="records-list"></div>
+      </div>
     </section>
 
     <section id="reviewView" class="view" aria-labelledby="reviewTitle">
@@ -238,7 +250,7 @@
       <article class="card muted-card version-card">
         <div>
           <p class="section-kicker">VERSION</p>
-          <h3>Coach Jérémy v0.3</h3>
+          <h3>Coach Jérémy v0.4</h3>
         </div>
         <p class="small muted">Données locales, historique intégré, aucun envoi automatique sur Internet.</p>
       </article>
@@ -283,7 +295,7 @@
       <div class="dialog-handle"></div>
       <div class="dialog-head">
         <div><p class="section-kicker">EXÉCUTION</p><h3>Signaler un problème</h3></div>
-        <button value="cancel" class="close-dialog" aria-label="Fermer">×</button>
+        <button id="closeIssueDialog" value="cancel" class="close-dialog" aria-label="Fermer">×</button>
       </div>
       <div id="issueChoices" class="tag-selector issue-grid"></div>
       <div id="painFields" class="conditional-fields hidden">
@@ -297,6 +309,26 @@
       </div>
       <label class="textarea-label"><span>Commentaire facultatif</span><textarea id="issueNote" rows="3" placeholder="Ce qui s’est passé..."></textarea></label>
       <button id="saveIssueBtn" value="default" class="primary-button full-button" type="submit">Enregistrer</button>
+    </form>
+  </dialog>
+
+  <dialog id="skipSessionDialog" class="app-dialog sheet-dialog">
+    <form method="dialog" id="skipSessionForm">
+      <div class="dialog-handle"></div>
+      <div class="dialog-head">
+        <div><p class="section-kicker">SÉANCE NON RÉALISÉE</p><h3>Pourquoi passes-tu cette séance ?</h3></div>
+        <button value="cancel" class="close-dialog" aria-label="Fermer">×</button>
+      </div>
+      <div id="skipReasonChoices" class="tag-selector issue-grid">
+        <label class="choice-chip"><input type="radio" name="skipReason" value="Douleur ou blessure"><span>Douleur / blessure</span></label>
+        <label class="choice-chip"><input type="radio" name="skipReason" value="Fatigue ou récupération"><span>Fatigue / récupération</span></label>
+        <label class="choice-chip"><input type="radio" name="skipReason" value="Manque de temps"><span>Manque de temps</span></label>
+        <label class="choice-chip"><input type="radio" name="skipReason" value="Déplacement ou contrainte"><span>Déplacement / contrainte</span></label>
+        <label class="choice-chip"><input type="radio" name="skipReason" value="Maladie"><span>Maladie</span></label>
+        <label class="choice-chip"><input type="radio" name="skipReason" value="Autre"><span>Autre</span></label>
+      </div>
+      <label class="textarea-label"><span>Explication</span><textarea id="skipReasonNote" rows="3" placeholder="Une phrase suffit, mais elle sera reprise dans le bilan ChatGPT."></textarea></label>
+      <button id="confirmSkipSessionBtn" value="default" class="danger-button full-button" type="submit">Confirmer la séance non réalisée</button>
     </form>
   </dialog>
 
