@@ -1,14 +1,14 @@
 # Activer la synchronisation PC / iPhone
 
-La version v0.5 contient déjà tout le code nécessaire. Il reste uniquement à créer une base D1 et à la relier au projet Cloudflare Pages.
+La version v0.6 contient déjà tout le code nécessaire. Il reste uniquement à créer une base D1 et à la relier au projet Cloudflare Pages.
 
-## 1. Mettre la v0.5 en ligne
+## 1. Mettre la v0.6 en ligne
 
 Dans le dossier GitHub local :
 
-1. remplacer les fichiers par ceux de la v0.5 ;
+1. remplacer les fichiers par ceux de la v0.6 ;
 2. ouvrir GitHub Desktop ;
-3. saisir `Passage à la version v0.5 — synchronisation et suivi du poids` ;
+3. saisir `Passage à la version v0.6 — synchronisation et suivi du poids` ;
 4. cliquer sur `Commit to main` ;
 5. cliquer sur `Push origin`.
 

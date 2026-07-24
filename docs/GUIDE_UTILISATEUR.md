@@ -1,61 +1,81 @@
-# Guide utilisateur — version 0.5
+# Guide utilisateur — version 0.6
 
 ## Démarrer une séance
 
 1. Saisir le poids du matin sur l’accueil.
 2. Appuyer sur la carte de prochaine séance.
-3. Renseigner l’énergie avant la séance.
+3. Ajuster l’énergie avec les boutons `− / +`.
 
-Les séances sont affichées en `Jour 1`, `Jour 2`, etc. Le jour de semaine indiqué dans le programme est uniquement une suggestion. La date réelle est enregistrée quand la séance est clôturée.
+Les séances sont affichées en `Jour 1`, `Jour 2`, etc. Le jour de semaine est uniquement une suggestion. La date réelle n’est enregistrée que lorsque la séance est terminée ou déclarée non réalisée.
 
 ## Renseigner un exercice
 
 ### Lorsque tout est conforme
 
-1. Sélectionner le RPE de l’exercice.
-2. Appuyer sur `Conforme`.
+1. Appuyer sur `Conforme`.
+2. Sélectionner le RPE de l’exercice.
+3. Appuyer sur `Valider l’exercice`.
 
-Les séries prévues sont validées et l’exercice suivant s’ouvre automatiquement.
+Les séries prévues sont reprises automatiquement et l’exercice suivant s’ouvre.
 
 ### Lorsque le réalisé diffère du programme
 
-1. Ouvrir le détail des séries.
+1. Appuyer sur `Ajuster`.
 2. Modifier la charge et les répétitions avec `− / +` ou par saisie directe.
-3. Cocher chaque série terminée ; le chronomètre de repos démarre automatiquement.
-4. Modifier le statut si nécessaire.
+3. Cocher les séries terminées ; le chronomètre démarre automatiquement.
+4. Sélectionner le RPE.
 5. Valider l’exercice.
 
-### Signaler un problème
+Le statut est calculé automatiquement : réussi si tout correspond, partiel en cas d’écart ou échec si aucune série n’est validée.
 
-Appuyer sur `Problème`, puis sélectionner une ou plusieurs causes. Les champs de douleur ou de technique apparaissent uniquement lorsque nécessaires.
+### Actions complémentaires
 
-## Clôturer ou passer une séance
+Le bouton `•••` permet de :
 
-Après l’entraînement, compléter la durée, le RPE global et un commentaire éventuel, puis appuyer sur `Terminer la séance`.
+- signaler un problème ;
+- indiquer qu’une série a été filmée ;
+- marquer l’exercice comme remplacé ;
+- marquer l’exercice comme non réalisé.
 
-Si la séance n’est pas effectuée, utiliser `Je ne fais pas cette séance` et expliquer la cause. Cette information sera reprise dans l’export ChatGPT.
+## Chronomètre et fin de séance
+
+Le dock inférieur permet de passer d’un exercice à l’autre et de gérer le temps de repos. Après validation de tous les exercices, il affiche le bouton `Terminer`.
+
+La feuille de clôture demande la durée réelle, le RPE global et un commentaire éventuel. La date et l’heure sont enregistrées à cet instant.
+
+Pour ne pas réaliser une séance, ouvrir le menu `•••` en haut à droite puis expliquer la cause.
 
 ## Historique
 
 - `Semaines` : bilans archivés lors de chaque nouvel import.
 - `Records` : charge la plus lourde validée par exercice, répétitions et date.
-- `Poids` : courbe des dernières pesées et liste exhaustive de toutes les mesures.
+- `Poids` : graphique et liste complète des pesées.
 
-## En fin de semaine
+Le graphique du poids propose :
+
+- les 30 derniers jours ;
+- les trois derniers mois ;
+- toute la période.
+
+La courbe orange en pointillés correspond à la moyenne mobile des sept dernières pesées. Les mesures sont regroupées par mois.
+
+## Bilan hebdomadaire
 
 1. Ouvrir `Bilan`.
-2. Vérifier les statistiques automatiques.
+2. Vérifier les indicateurs automatiques.
 3. Compléter sommeil, énergie, faim, protéines, pas, cardio et ressenti.
-4. Appuyer sur `Copier pour ChatGPT`.
-5. Coller le bilan dans le chat sportif.
+4. Appuyer sur `Copier le bilan pour ChatGPT`.
+5. Coller le contenu dans le chat sportif.
 
 ## Importer la semaine suivante
 
 1. Copier la réponse de ChatGPT contenant `SPORT_APP_IMPORT_START` et `SPORT_APP_IMPORT_END`.
 2. Ouvrir `Données`.
-3. Coller puis appuyer sur `Vérifier`.
+3. Appuyer sur `Importer une nouvelle semaine`.
 4. Contrôler l’aperçu.
-5. Appuyer sur `Archiver la semaine actuelle et importer`.
+5. Valider l’import.
+
+Le contenu JSON brut reste replié. Il peut être ouvert manuellement lorsque l’accès au presse-papiers est refusé.
 
 ## Synchronisation PC / iPhone
 
@@ -65,12 +85,14 @@ Lorsque Cloudflare D1 est configuré, la synchronisation se lance automatiquemen
 - après une modification ;
 - au retour de la connexion Internet.
 
-Le bouton `Synchroniser maintenant` permet de forcer l’opération. Toutes les données restent aussi enregistrées localement, ce qui permet de continuer hors connexion.
-
-Lors de la première utilisation sur un deuxième appareil, si deux versions différentes existent, l’application demande laquelle conserver. Télécharger une sauvegarde avant le choix lorsque les deux versions contiennent des données utiles.
+L’icône de nuage dans `Données` permet de forcer la synchronisation. Les données restent aussi enregistrées localement pour continuer hors connexion.
 
 ## Réinitialisation et sauvegarde
 
-`Réinitialiser` conserve le programme et l’historique ; seules les validations, les saisies et les pesées de la semaine courante sont effacées.
+`Réinitialiser` conserve le programme et l’historique ; seules les validations, saisies et pesées de la semaine courante sont effacées.
 
-La synchronisation ne remplace pas la sauvegarde JSON. Télécharger ponctuellement une sauvegarde depuis `Données`, notamment avant un changement important ou une restauration.
+Télécharger ponctuellement une sauvegarde JSON depuis `Données`, notamment avant une restauration ou une modification importante.
+
+## Apparence
+
+L’application suit automatiquement le mode clair ou sombre défini sur l’iPhone. La navigation disparaît pendant une séance et lorsque le clavier est ouvert afin de maximiser l’espace utile.

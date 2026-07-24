@@ -1,23 +1,23 @@
-# Coach Jérémy — v0.5
+# Coach Jérémy — v0.6
 
-Application web mobile de suivi sportif, optimisée pour iPhone et synchronisée entre appareils.
+Application web mobile de suivi sportif, optimisée pour l’iPhone 13, installable en PWA et synchronisée entre appareils.
 
 ## Fonctionnalités principales
 
 - séances ordonnées en Jour 1, Jour 2, etc. ;
 - date réelle enregistrée uniquement à la clôture d’une séance ;
-- séance non réalisée avec cause documentée ;
+- mode séance immersif sans navigation parasite ;
+- validation rapide `Conforme`, ajustement détaillé uniquement si nécessaire ;
 - charges, répétitions, séries, RPE, problèmes et commentaires ;
-- chronomètre de repos ;
+- chronomètre de repos flottant ;
 - bilan hebdomadaire et export structuré pour ChatGPT ;
-- import JSON de la semaine suivante ;
+- import JSON de la semaine suivante avec aperçu ;
 - archivage des semaines et records de charge par exercice ;
-- historique complet du poids avec courbe et journal de toutes les pesées ;
+- historique complet du poids, moyenne mobile 7 jours et périodes 30 jours / 3 mois / tout ;
+- mode clair et mode sombre automatiques ;
 - stockage local hors connexion ;
 - synchronisation automatique PC / iPhone avec Cloudflare D1 ;
-- bouton de synchronisation manuelle et gestion des conflits ;
-- sauvegarde et restauration JSON ;
-- installation possible en PWA.
+- sauvegarde et restauration JSON.
 
 ## Mise à jour du site
 
@@ -41,7 +41,7 @@ La synchronisation nécessite une base Cloudflare D1 liée au projet Pages sous 
 
 Consulter le guide : [`docs/CONFIGURATION_SYNCHRONISATION.md`](docs/CONFIGURATION_SYNCHRONISATION.md).
 
-La table est créée automatiquement au premier appel de l’application. Le fichier `migrations/0001_create_app_state.sql` est fourni comme référence et pour une éventuelle création manuelle.
+La table est créée automatiquement au premier appel de l’application. Le fichier `migrations/0001_create_app_state.sql` est fourni comme référence.
 
 ## Fonctionnement hors connexion
 
@@ -55,4 +55,4 @@ python3 -m http.server 8000 --directory public
 
 Puis ouvrir `http://localhost:8000`.
 
-L’API `/api/sync` ne fonctionne localement qu’avec un environnement Cloudflare Pages Functions configuré ; l’interface continue néanmoins à fonctionner intégralement en stockage local.
+L’API `/api/sync` ne fonctionne localement qu’avec un environnement Cloudflare Pages Functions configuré ; l’interface continue néanmoins à fonctionner en stockage local.

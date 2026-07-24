@@ -1,5 +1,29 @@
 # Historique des versions
 
+## v0.6 — 24 juillet 2026
+
+- Refonte complète du système visuel avec une seule couche CSS cohérente.
+- Accueil compact : prochaine séance, synthèse hebdomadaire et pesée visibles plus rapidement.
+- Mode séance immersif : navigation générale masquée et premier exercice affiché plus haut.
+- En-tête de séance allégé avec poids et énergie sur une seule ligne.
+- Cartes d’exercices simplifiées autour de trois actions : `Conforme`, `Ajuster` et menu complémentaire.
+- Détail des séries masqué tant qu’il n’est pas nécessaire.
+- Statut d’exercice calculé automatiquement selon les séries réalisées.
+- RPE compact centré autour de la cible, avec accès aux autres valeurs.
+- Clôture de séance déplacée dans le dock lorsque tous les exercices sont traités.
+- Actions secondaires et confirmations présentées sous forme de feuilles basses inspirées d’iOS.
+- Zones tactiles harmonisées à 44 px minimum.
+- Liquid Glass réservé à la navigation et au chronomètre ; cartes de contenu rendues plus lisibles.
+- Typographie, rayons, séparateurs et ombres harmonisés.
+- Onglet Données simplifié, avec synchronisation discrète et import direct depuis le presse-papiers.
+- JSON brut replié par défaut après l’import.
+- Pesées regroupées par mois.
+- Périodes de graphique : 30 jours, 3 mois ou totalité.
+- Ajout d’une moyenne mobile sur sept pesées.
+- Navigation masquée automatiquement lorsque le clavier de l’iPhone est ouvert.
+- Respect renforcé des safe areas et de la hauteur dynamique du viewport.
+- Mode sombre automatique complet.
+
 ## v0.5 — 24 juillet 2026
 
 - Ajout de la synchronisation Cloudflare D1 entre le PC et l’iPhone.
