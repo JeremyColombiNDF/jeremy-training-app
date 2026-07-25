@@ -1,4 +1,4 @@
-# Série — version 1.1.0
+# Série — version 1.1.1
 
 Série transforme un programme sportif conçu dans ChatGPT en carnet d’entraînement interactif, sans imposer de méthode de programmation.
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1
+
+- Charge réelle saisissable pour chaque série, y compris sur les exercices au poids du corps ou à charge libre.
+- Charge cible toujours visible dans le résumé compact lorsqu’elle est structurée, avec repli depuis les consignes si nécessaire.
+- Cible détaillée sous chaque série : charge, répétitions, RPE/RIR et repos.
+- Action rapide pour appliquer une charge aux séries suivantes.
+- Repos démarré automatiquement après validation d’une série et lié à la prochaine série.
+- Affichage de la prochaine série dans le dock de repos.
+- Progression circulaire, alerte visuelle sur les 15 dernières secondes et état « Prêt ».
+- Durées rapides 1:00 à 4:00, mémorisables par exercice.
+- Chronomètre recalculé à partir de l’heure de fin pour rester juste après un passage en arrière-plan.
+
 ## 1.1.0
 
 - Liste mondiale des profils synchronisés, commune au site, à la PWA et aux différents appareils.

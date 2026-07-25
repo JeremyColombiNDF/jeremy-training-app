@@ -8,7 +8,7 @@ const PROFILE_STATE_PREFIX = "serie_profile_state_v1_";
 const PROFILE_SYNC_PREFIX = "serie_profile_sync_v1_";
 const APP_SCHEMA = "1.1";
 const SUPPORTED_SCHEMAS = new Set(["1.0", "1.1"]);
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 const CHAT_PROMPT_VERSION = "1.1";
 const SYNC_ENDPOINT = "/api/sync";
 const PROFILES_ENDPOINT = "/api/profiles";
@@ -135,6 +135,10 @@ let issueContext = null;
 let timerRemaining = 0;
 let timerRunning = false;
 let timerInterval = null;
+let timerTotal = 0;
+let timerEndAt = 0;
+let timerContext = null;
+let timerFinished = false;
 let syncMeta = null;
 let syncTimer = null;
 let syncInFlight = false;
@@ -427,6 +431,7 @@ function migrateState(parsed) {
       er.show_sets = Boolean(er.show_sets);
       er.show_rpe = Boolean(er.show_rpe);
       er.show_all_rpe = Boolean(er.show_all_rpe);
+      er.rest_override_sec = numberOrBlank(er.rest_override_sec);
       er.sets = (er.sets || []).map((setData, index) => {
         const planned = exerciseData.sets[index] || {};
         return {
@@ -497,6 +502,7 @@ function exerciseResult(sessionId, exerciseData, targetState = state) {
       show_sets: false,
       show_rpe: false,
       show_all_rpe: false,
+      rest_override_sec: "",
       sets: (exerciseData.sets || []).map(planned => ({
         weight_kg: planned.weight_kg ?? "",
         reps: planned.reps ?? planned.reps_min ?? "",
@@ -939,11 +945,11 @@ function bindStaticEvents() {
   $("#prevExerciseBtn").addEventListener("click", () => moveExercise(-1));
   $("#nextExerciseBtn").addEventListener("click", () => moveExercise(1));
   $("#timerBtn").addEventListener("click", toggleTimer);
-  $("#addTimerBtn").addEventListener("click", () => {
-    timerRemaining += 30;
-    if (!timerRunning) startTimerInterval();
-    updateTimerDisplay();
-  });
+  $("#addTimerBtn").addEventListener("click", () => addRestTime(30));
+  $("#restDurationBtn").addEventListener("click", openRestDurationDialog);
+  $("#skipTimerBtn").addEventListener("click", () => { stopTimer(); toast("Repos passé"); });
+  $("#closeRestDurationDialog").addEventListener("click", () => $("#restDurationDialog").close());
+  $$("[data-rest-seconds]").forEach(button => button.addEventListener("click", () => chooseRestDuration(Number(button.dataset.restSeconds))));
 
   const updateKeyboardState = () => {
     const vv = window.visualViewport;
@@ -1241,7 +1247,7 @@ function renderExerciseCard(session, exerciseData, index) {
       <button class="exercise-summary" type="button">
         <div class="exercise-summary-copy">
           <div class="exercise-title-row"><h3>${index + 1}. ${escapeHtml(exerciseData.name)}</h3>${superset}</div>
-          <p>${escapeHtml(prescriptionText(exerciseData.sets))}${completed ? ` · ${labelFor(EXERCISE_STATUSES, result.status)}` : ""}</p>
+          <p>${escapeHtml(prescriptionText(exerciseData.sets, exerciseData))}${completed ? ` · ${labelFor(EXERCISE_STATUSES, result.status)}` : ""}</p>
         </div>
         <span class="exercise-state-icon">${completed ? checkIcon() : `<span class="exercise-chevron">${chevronDownIcon()}</span>`}</span>
       </button>
@@ -1277,7 +1283,7 @@ function renderExerciseCard(session, exerciseData, index) {
 
         <div class="sets-panel ${result.show_sets ? "open" : ""}">
           <div class="panel-label-row"><span>Séries réalisées</span><small>Modifie uniquement les écarts</small></div>
-          ${result.sets.map((actualSet, setIndex) => renderSetRow(exerciseData, actualSet, setIndex)).join("")}
+          ${result.sets.map((actualSet, setIndex) => renderSetRow(exerciseData, actualSet, setIndex, result.sets.length)).join("")}
           <button class="add-set" type="button">Ajouter une série</button>
         </div>
 
@@ -1307,9 +1313,12 @@ function setMetricConfig(planned = {}, actual = {}) {
 }
 
 function shouldShowWeightControl(exerciseData, actualSet, planned) {
-  return (exerciseData.sets || []).some(setData => setData.weight_kg !== null && setData.weight_kg !== undefined)
-    || (actualSet.weight_kg !== "" && actualSet.weight_kg !== null && actualSet.weight_kg !== undefined)
-    || exerciseData.tracking_mode === "weight_reps";
+  const hasStructuredWeight = (exerciseData.sets || []).some(setData => setData.weight_kg !== null && setData.weight_kg !== undefined);
+  const hasActualWeight = actualSet.weight_kg !== "" && actualSet.weight_kg !== null && actualSet.weight_kg !== undefined;
+  const metric = primaryMetricForSet({ ...planned, ...actualSet });
+  // Dès qu’un exercice se suit en répétitions, la charge reste saisissable, même au poids du corps.
+  // Cela permet notamment de noter un lest sur des tractions/dips ou une charge libre non prescrite.
+  return hasStructuredWeight || hasActualWeight || exerciseData.tracking_mode === "weight_reps" || metric === "reps";
 }
 
 function setControlHtml({ field, inputClass, label, step, min, placeholder }, value) {
@@ -1323,23 +1332,33 @@ function setControlHtml({ field, inputClass, label, step, min, placeholder }, va
   </div>`;
 }
 
-function renderSetRow(exerciseData, actualSet, index) {
+function renderSetRow(exerciseData, actualSet, index, totalSets) {
   const planned = exerciseData.sets[index] || {};
   const weightStep = inferWeightStep(exerciseData);
   const metric = setMetricConfig(planned, actualSet);
   const showWeight = shouldShowWeightControl(exerciseData, actualSet, planned);
   const weightControl = showWeight ? setControlHtml({ field: "weight_kg", inputClass: "set-weight", label: "kg", step: weightStep, min: 0, placeholder: planned.weight_kg ?? "" }, actualSet.weight_kg) : "";
   const metricControl = setControlHtml(metric, actualSet[metric.field]);
-  const setNote = [planned.tempo ? `Tempo ${planned.tempo}` : "", planned.notes || ""].filter(Boolean).join(" · ");
+  const targetParts = [];
+  if (planned.weight_kg !== null && planned.weight_kg !== undefined) targetParts.push(formatWeight(planned.weight_kg));
+  targetParts.push(plannedMetricText(planned));
+  const effort = plannedEffortText(planned);
+  if (effort) targetParts.push(effort);
+  if (planned.rest_sec) targetParts.push(`repos ${formatRestDuration(planned.rest_sec)}`);
+  if (planned.tempo) targetParts.push(`tempo ${planned.tempo}`);
+  if (planned.notes) targetParts.push(planned.notes);
+  const setNote = `Cible · ${targetParts.filter(Boolean).join(" · ")}`;
+  const canCopyForward = showWeight && index < totalSets - 1;
   return `
     <div class="set-row ${actualSet.completed ? "checked" : ""} ${showWeight ? "" : "single-metric"}" data-set-index="${index}">
       <span class="set-number">${index + 1}</span>
       <div class="set-controls">${weightControl}${metricControl}</div>
       <div class="set-row-actions">
+        ${canCopyForward ? `<button class="copy-weight-forward" type="button" aria-label="Appliquer cette charge aux séries suivantes" title="Même charge pour les suivantes">${copyDownIcon()}</button>` : ""}
         <button class="set-check ${actualSet.completed ? "checked" : ""}" type="button" aria-label="Valider la série">${checkIcon()}</button>
         <button class="remove-set" type="button" aria-label="Supprimer la série">×</button>
       </div>
-      ${setNote ? `<small class="set-plan-note">${escapeHtml(setNote)}</small>` : ""}
+      <small class="set-plan-note">${escapeHtml(setNote)}</small>
     </div>`;
 }
 
@@ -1550,11 +1569,29 @@ function bindSetRow(row, result, exerciseData, session) {
     result.sets[index][field] = next;
     saveState();
   }));
+  row.querySelector(".copy-weight-forward")?.addEventListener("click", () => {
+    persistInputs();
+    const weight = numberOrBlank(result.sets[index]?.weight_kg);
+    if (weight === "") {
+      toast("Indique d’abord une charge");
+      return;
+    }
+    result.sets.slice(index + 1).forEach(setData => { setData.weight_kg = weight; });
+    saveState();
+    renderSession(session.id);
+    reopenExercise(exerciseData.id);
+    toast("Charge appliquée aux séries suivantes");
+  });
   row.querySelector(".set-check").addEventListener("click", () => {
     persistInputs();
     result.sets[index].completed = !result.sets[index].completed;
     const nowCompleted = result.sets[index].completed;
-    if (nowCompleted) startRest(exerciseData.sets[index]?.rest_sec || 90);
+    if (nowCompleted) {
+      const restSeconds = numberOrBlank(result.rest_override_sec) !== ""
+        ? Number(result.rest_override_sec)
+        : Number(exerciseData.sets[index]?.rest_sec || 90);
+      startRest(restSeconds, buildRestContext(session, exerciseData, result, index));
+    }
     saveState();
     row.classList.toggle("checked", nowCompleted);
     row.querySelector(".set-check").classList.toggle("checked", nowCompleted);
@@ -2522,9 +2559,71 @@ function moveExercise(direction) {
   reopenExercise(activeExerciseId, true);
 }
 
-function startRest(seconds) {
-  timerRemaining = Number(seconds) || 90;
-  timerRunning = true;
+function buildRestContext(session, exerciseData, result, completedSetIndex = -1) {
+  const nextSetIndex = result.sets.findIndex((setData, index) => index > completedSetIndex && !setData.completed);
+  if (nextSetIndex >= 0) {
+    return { sessionId: session.id, exerciseId: exerciseData.id, nextSetIndex, defaultSeconds: Number(result.rest_override_sec || exerciseData.sets[completedSetIndex]?.rest_sec || exerciseData.sets[nextSetIndex]?.rest_sec || 90) };
+  }
+  const exerciseIndex = session.exercises.findIndex(item => item.id === exerciseData.id);
+  const nextExercise = session.exercises.slice(exerciseIndex + 1).find(item => !FINISHED_EXERCISE_STATUSES.has(exerciseResult(session.id, item).status));
+  return {
+    sessionId: session.id,
+    exerciseId: exerciseData.id,
+    nextSetIndex: -1,
+    nextExerciseId: nextExercise?.id || "",
+    defaultSeconds: Number(result.rest_override_sec || exerciseData.sets[completedSetIndex]?.rest_sec || 90)
+  };
+}
+
+function restContextForCurrentExercise() {
+  const session = state.week.sessions.find(item => item.id === currentSessionId);
+  const exerciseData = session?.exercises.find(item => item.id === activeExerciseId);
+  if (!session || !exerciseData) return null;
+  const result = exerciseResult(session.id, exerciseData);
+  const nextSetIndex = result.sets.findIndex(setData => !setData.completed);
+  return {
+    sessionId: session.id,
+    exerciseId: exerciseData.id,
+    nextSetIndex: nextSetIndex >= 0 ? nextSetIndex : 0,
+    defaultSeconds: Number(result.rest_override_sec || exerciseData.sets[Math.max(0, nextSetIndex)]?.rest_sec || 90)
+  };
+}
+
+function describeRestContext(context = timerContext) {
+  if (!context) return { eyebrow: "Repos", detail: "Choisir une durée" };
+  const session = state.week.sessions.find(item => item.id === context.sessionId);
+  const exerciseData = session?.exercises.find(item => item.id === context.exerciseId);
+  if (!session || !exerciseData) return { eyebrow: "Repos", detail: "Prochaine série" };
+  const result = exerciseResult(session.id, exerciseData);
+  if (Number.isInteger(context.nextSetIndex) && context.nextSetIndex >= 0) {
+    const actual = result.sets[context.nextSetIndex] || {};
+    const planned = exerciseData.sets[context.nextSetIndex] || {};
+    return {
+      eyebrow: `Prochaine série · ${context.nextSetIndex + 1}/${result.sets.length}`,
+      detail: compactSetTarget(actual, planned)
+    };
+  }
+  const nextExercise = session.exercises.find(item => item.id === context.nextExerciseId);
+  if (nextExercise) return { eyebrow: "Exercice suivant", detail: nextExercise.name };
+  return { eyebrow: "Exercice terminé", detail: "Récupère avant de poursuivre" };
+}
+
+function compactSetTarget(actual = {}, planned = {}) {
+  const parts = [];
+  const weight = numberOrBlank(actual.weight_kg) !== "" ? actual.weight_kg : planned.weight_kg;
+  if (weight !== null && weight !== undefined && weight !== "") parts.push(formatWeight(weight));
+  const metricSource = { ...planned, ...Object.fromEntries(Object.entries(actual).filter(([, value]) => value !== "" && value !== null && value !== undefined)) };
+  parts.push(plannedMetricText(metricSource));
+  return parts.filter(Boolean).join(" × ").replace(" × série", "");
+}
+
+function startRest(seconds, context = null) {
+  timerTotal = Math.max(1, Number(seconds) || 90);
+  timerRemaining = timerTotal;
+  timerContext = context || timerContext || restContextForCurrentExercise();
+  if (timerContext) timerContext.defaultSeconds = timerTotal;
+  timerFinished = false;
+  timerEndAt = Date.now() + timerRemaining * 1000;
   startTimerInterval();
   updateTimerDisplay();
 }
@@ -2532,27 +2631,42 @@ function startRest(seconds) {
 function startTimerInterval() {
   clearInterval(timerInterval);
   timerRunning = true;
+  if (!timerEndAt) timerEndAt = Date.now() + timerRemaining * 1000;
   timerInterval = setInterval(() => {
     if (!timerRunning) return;
-    timerRemaining = Math.max(0, timerRemaining - 1);
+    timerRemaining = Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000));
     updateTimerDisplay();
-    if (timerRemaining === 0) {
-      stopTimer();
-      toast("Repos terminé");
-      if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
-    }
-  }, 1000);
+    if (timerRemaining === 0) finishRestTimer();
+  }, 250);
 }
 
 function toggleTimer() {
-  if (timerRemaining <= 0) {
-    startRest(90);
+  if (timerFinished || (timerRemaining <= 0 && !timerRunning)) {
+    openRestDurationDialog();
     return;
   }
-  timerRunning = !timerRunning;
-  if (timerRunning) startTimerInterval();
-  else clearInterval(timerInterval);
+  if (timerRunning) {
+    timerRemaining = Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000));
+    timerRunning = false;
+    timerEndAt = 0;
+    clearInterval(timerInterval);
+  } else {
+    timerEndAt = Date.now() + timerRemaining * 1000;
+    startTimerInterval();
+  }
   updateTimerDisplay();
+}
+
+function finishRestTimer() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+  timerRunning = false;
+  timerEndAt = 0;
+  timerRemaining = 0;
+  timerFinished = true;
+  updateTimerDisplay();
+  toast("Repos terminé · prêt pour la suite");
+  if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
 }
 
 function stopTimer() {
@@ -2560,15 +2674,75 @@ function stopTimer() {
   timerInterval = null;
   timerRunning = false;
   timerRemaining = 0;
+  timerTotal = 0;
+  timerEndAt = 0;
+  timerContext = null;
+  timerFinished = false;
   updateTimerDisplay();
+}
+
+function addRestTime(seconds = 30) {
+  const delta = Number(seconds) || 30;
+  if (timerFinished || timerRemaining <= 0) {
+    startRest(delta, timerContext || restContextForCurrentExercise());
+    return;
+  }
+  timerRemaining += delta;
+  timerTotal += delta;
+  if (timerRunning) timerEndAt += delta * 1000;
+  updateTimerDisplay();
+}
+
+function openRestDurationDialog() {
+  const context = timerContext || restContextForCurrentExercise();
+  timerContext = context;
+  const exerciseData = context
+    ? state.week.sessions.find(item => item.id === context.sessionId)?.exercises.find(item => item.id === context.exerciseId)
+    : null;
+  const result = exerciseData && context ? exerciseResult(context.sessionId, exerciseData) : null;
+  $("#rememberRestDuration").checked = Boolean(result);
+  $("#restDurationDialog").showModal();
+}
+
+function chooseRestDuration(seconds) {
+  const context = timerContext || restContextForCurrentExercise();
+  if (context && $("#rememberRestDuration").checked) {
+    const session = state.week.sessions.find(item => item.id === context.sessionId);
+    const exerciseData = session?.exercises.find(item => item.id === context.exerciseId);
+    if (exerciseData) {
+      exerciseResult(context.sessionId, exerciseData).rest_override_sec = Number(seconds);
+      saveState();
+    }
+  }
+  $("#restDurationDialog").close();
+  startRest(seconds, context);
 }
 
 function updateTimerDisplay() {
   const minutes = Math.floor(timerRemaining / 60);
   const seconds = String(timerRemaining % 60).padStart(2, "0");
-  $("#timerDisplay").textContent = timerRemaining ? `${minutes}:${seconds}` : "Repos";
-  $("#timerHint").textContent = timerRemaining ? (timerRunning ? "Pause" : "Reprendre") : "Démarrer";
+  const active = Boolean(timerContext) && (timerRemaining > 0 || timerFinished);
+  const progress = timerTotal > 0 ? Math.max(0, Math.min(1, timerRemaining / timerTotal)) : 0;
+  const dock = $("#trainingDock");
+  dock?.classList.toggle("rest-active", active);
+  dock?.classList.toggle("rest-ending", active && !timerFinished && timerRemaining <= 15);
+  dock?.classList.toggle("rest-ready-state", timerFinished);
+  dock?.style.setProperty("--rest-progress", `${progress * 360}deg`);
+  document.body.classList.toggle("rest-timer-active", active && currentViewId === "sessionView");
+  $("#timerDisplay").textContent = timerFinished ? "Prêt" : timerRemaining ? `${minutes}:${seconds}` : "Repos";
+  $("#timerHint").textContent = timerFinished ? "Terminé" : timerRemaining ? (timerRunning ? "Pause" : "Reprendre") : "Démarrer";
+  const description = describeRestContext();
+  $("#timerNextEyebrow").textContent = description.eyebrow;
+  $("#timerNextSet").textContent = description.detail;
+  $("#restDurationLabel").textContent = formatTimerDuration(timerTotal || timerContext?.defaultSeconds || 90);
+  $("#restMeta").classList.toggle("hidden", !active);
 }
+
+function formatTimerDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
+}
+
 
 function inferWeightStep(exerciseData) {
   if (Number(exerciseData.weight_step_kg)) return Number(exerciseData.weight_step_kg);
@@ -2600,7 +2774,41 @@ function plannedEffortText(setData = {}) {
   return low === high ? `RPE ${String(low).replace(".", ",")}` : `RPE ${String(low).replace(".", ",")}–${String(high).replace(".", ",")}`;
 }
 
-function prescriptionText(sets) {
+function formatRestDuration(seconds) {
+  const total = Number(seconds || 0);
+  if (!total) return "";
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  if (!minutes) return `${remainder} s`;
+  return remainder ? `${minutes} min ${String(remainder).padStart(2, "0")}` : `${minutes} min`;
+}
+
+function extractFallbackTargetWeights(exerciseData = {}) {
+  const source = [exerciseData.general_notes, exerciseData.instructions].filter(Boolean).join(" · ");
+  const values = [];
+  const patterns = [
+    /(?:cible|charge|top\s*set|back[- ]?off)[^0-9]{0,28}(\d+(?:[.,]\d+)?)\s*kg/gi,
+    /(?:@|\bà)\s*:?[ ]*(\d+(?:[.,]\d+)?)\s*kg/gi,
+    /(?:^|[·;,()])\s*(\d+(?:[.,]\d+)?)\s*kg\b/gi
+  ];
+  patterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(source))) {
+      const value = Number(String(match[1]).replace(",", "."));
+      if (Number.isFinite(value) && value > 0 && !values.includes(value)) values.push(value);
+    }
+  });
+  return values.slice(0, 3);
+}
+
+function restSummaryText(sets = []) {
+  const values = [...new Set(sets.map(setData => Number(setData.rest_sec)).filter(value => Number.isFinite(value) && value > 0))].sort((a, b) => a - b);
+  if (!values.length) return "";
+  if (values.length === 1) return `repos ${formatRestDuration(values[0])}`;
+  return `repos ${formatRestDuration(values[0])}–${formatRestDuration(values.at(-1))}`;
+}
+
+function prescriptionText(sets, exerciseData = {}) {
   if (!sets?.length) return "Aucune série";
   const groups = [];
   sets.forEach(setData => {
@@ -2613,7 +2821,7 @@ function prescriptionText(sets) {
     if (previous?.key === key) previous.count += 1;
     else groups.push({ key, count: 1, set: setData });
   });
-  return groups.map(group => {
+  let summary = groups.map(group => {
     const setData = group.set;
     const parts = [`${group.count}×${plannedMetricText(setData)}`];
     if (setData.weight_kg !== null && setData.weight_kg !== undefined) parts.push(formatWeight(setData.weight_kg));
@@ -2622,7 +2830,17 @@ function prescriptionText(sets) {
     if (setData.tempo) parts.push(`tempo ${setData.tempo}`);
     return parts.join(" · ");
   }).join(" puis ");
+  const hasStructuredWeight = sets.some(setData => setData.weight_kg !== null && setData.weight_kg !== undefined);
+  if (!hasStructuredWeight) {
+    const fallbackWeights = extractFallbackTargetWeights(exerciseData);
+    if (fallbackWeights.length === 1) summary += ` · cible ${formatWeight(fallbackWeights[0])}`;
+    else if (fallbackWeights.length > 1) summary += ` · cible ${fallbackWeights.map(formatWeight).join(" → ")}`;
+  }
+  const rest = restSummaryText(sets);
+  if (rest) summary += ` · ${rest}`;
+  return summary;
 }
+
 
 
 function loadSyncMeta() {
@@ -3162,6 +3380,10 @@ function confirmAction(title, text, onConfirm) {
   };
   dialog.addEventListener("close", handler);
   dialog.showModal();
+}
+
+function copyDownIcon() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h10v7H7z"/><path d="M12 12v7m0 0-3-3m3 3 3-3"/></svg>`;
 }
 
 function checkIcon() { return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>`; }

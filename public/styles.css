@@ -750,3 +750,57 @@ body.profile-gate-open .app-header, body.profile-gate-open .app-shell, body.prof
 @media (prefers-color-scheme: dark) {
   .profile-refresh-button { background: color-mix(in srgb, var(--accent) 18%, #1c1c1e); }
 }
+
+
+/* Série 1.1.1 — charge par série et repos contextuel */
+body.rest-timer-active { --dock-height: 134px; }
+.exercise-summary-copy p { max-width: min(76vw, 520px); }
+.set-row-actions { min-width: 88px; }
+.copy-weight-forward {
+  width: 40px; height: 44px; display: grid; place-items: center; flex: 0 0 auto;
+  border: 1px solid var(--separator); border-radius: 11px; color: var(--accent); background: var(--bg-elevated);
+}
+.copy-weight-forward svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.set-plan-note { font-size: 10px; line-height: 1.35; }
+
+.training-dock.rest-active { row-gap: 7px; }
+.training-dock.rest-active .timer-main {
+  position: relative; isolation: isolate; overflow: hidden;
+  background: conic-gradient(var(--accent) var(--rest-progress, 0deg), var(--surface-subtle) 0);
+}
+.training-dock.rest-active .timer-main::before {
+  content: ""; position: absolute; inset: 4px; z-index: -1; border-radius: 14px; background: var(--bg-elevated);
+}
+.training-dock.rest-ending .timer-main { background: conic-gradient(var(--orange) var(--rest-progress, 0deg), var(--surface-subtle) 0); }
+.training-dock.rest-ready-state .timer-main { background: var(--green); color: #fff; }
+.training-dock.rest-ready-state .timer-main::before { display: none; }
+.training-dock.rest-ready-state .timer-main small { color: rgba(255,255,255,.78); }
+.rest-meta {
+  grid-column: 1 / -1; min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) 64px 64px; gap: 6px;
+  align-items: stretch; padding-top: 7px; border-top: 1px solid var(--separator);
+}
+.rest-next-copy { min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 2px 4px; }
+.rest-next-copy small { color: var(--text-secondary); font-size: 10px; }
+.rest-next-copy strong { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.rest-meta-button { min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 0; border-radius: 13px; color: var(--accent); background: var(--surface-subtle); }
+.rest-meta-button small { color: var(--text-secondary); font-size: 9px; }
+.rest-meta-button strong { margin-top: 1px; font-size: 12px; }
+.rest-meta-button.skip { color: var(--text-secondary); }
+.training-dock.ready .rest-meta { display: none !important; }
+
+.rest-duration-dialog { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+.rest-preset-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 15px 0; }
+.rest-preset-grid button { min-height: 50px; border: 1px solid var(--separator); border-radius: 14px; color: var(--accent); background: var(--surface); font-size: 17px; font-weight: 650; }
+.rest-preset-grid button:active { transform: scale(.97); background: var(--accent-soft); }
+.rest-remember-row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border-radius: 14px; background: var(--surface-subtle); }
+.rest-remember-row span, .rest-remember-row strong, .rest-remember-row small { display: block; }
+.rest-remember-row strong { font-size: 14px; }
+.rest-remember-row small { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
+.rest-remember-row input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+@media (max-width: 390px) {
+  .set-row { grid-template-columns: 25px minmax(0,1fr) 84px; }
+  .set-row-actions { min-width: 84px; gap: 2px; }
+  .copy-weight-forward { width: 38px; }
+  .rest-meta { grid-template-columns: minmax(0,1fr) 58px 58px; }
+}

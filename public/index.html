@@ -265,7 +265,7 @@
         <button id="backupBtn" class="settings-row list-button" type="button"><span>Télécharger une sauvegarde</span><svg class="row-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
         <label class="settings-row list-button file-row"><span>Restaurer une sauvegarde</span><svg class="row-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg><input id="restoreInput" type="file" accept="application/json,.json"></label>
       </article>
-      <p class="version-label">Série · Version 1.1.0</p>
+      <p class="version-label">Série · Version 1.1.1</p>
     </section>
   </main>
 
@@ -273,9 +273,14 @@
 
   <div id="trainingDock" class="training-dock hidden" aria-label="Contrôles de séance">
     <button id="prevExerciseBtn" class="dock-icon" type="button" aria-label="Exercice précédent"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
-    <button id="timerBtn" class="timer-main" type="button"><strong id="timerDisplay">Repos</strong><small id="timerHint">Démarrer</small></button>
+    <button id="timerBtn" class="timer-main" type="button" aria-label="Démarrer, mettre en pause ou reprendre le repos"><strong id="timerDisplay">Repos</strong><small id="timerHint">Démarrer</small></button>
     <button id="addTimerBtn" class="timer-add" type="button">+30 s</button>
     <button id="nextExerciseBtn" class="dock-icon" type="button" aria-label="Exercice suivant"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+    <div id="restMeta" class="rest-meta hidden">
+      <div class="rest-next-copy"><small id="timerNextEyebrow">Prochaine série</small><strong id="timerNextSet">—</strong></div>
+      <button id="restDurationBtn" class="rest-meta-button" type="button"><small>Durée</small><strong id="restDurationLabel">1:30</strong></button>
+      <button id="skipTimerBtn" class="rest-meta-button skip" type="button"><small>Repos</small><strong>Passer</strong></button>
+    </div>
     <button id="completeDockBtn" class="complete-dock-button hidden" type="button">Terminer</button>
   </div>
 
@@ -285,6 +290,20 @@
     <button class="nav-item" data-view="reviewView" type="button"><svg viewBox="0 0 24 24"><path d="M9 11 12 14 22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><small>Bilan</small></button>
     <button class="nav-item" data-view="dataView" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg><small>Données</small></button>
   </nav>
+
+  <dialog id="restDurationDialog" class="app-dialog sheet-dialog rest-duration-dialog">
+    <div class="dialog-handle"></div>
+    <div class="dialog-head"><div><h3>Durée du repos</h3><p>Choisis une durée rapide. Elle peut rester active pour cet exercice.</p></div><button id="closeRestDurationDialog" type="button" class="close-dialog" aria-label="Fermer">×</button></div>
+    <div class="rest-preset-grid">
+      <button type="button" data-rest-seconds="60">1:00</button>
+      <button type="button" data-rest-seconds="90">1:30</button>
+      <button type="button" data-rest-seconds="120">2:00</button>
+      <button type="button" data-rest-seconds="150">2:30</button>
+      <button type="button" data-rest-seconds="180">3:00</button>
+      <button type="button" data-rest-seconds="240">4:00</button>
+    </div>
+    <label class="rest-remember-row"><span><strong>Garder pour cet exercice</strong><small>Les prochaines séries utiliseront cette durée.</small></span><input id="rememberRestDuration" type="checkbox" checked></label>
+  </dialog>
 
   <dialog id="createProfileDialog" class="app-dialog sheet-dialog profile-form-dialog">
     <form method="dialog" id="createProfileForm">

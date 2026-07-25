@@ -69,3 +69,12 @@ Dans `Données`, utiliser `Partager Série`. Le lien partagé est l’adresse pu
 - de restaurer une sauvegarde dans le profil actif.
 
 Une sauvegarde est recommandée avant une migration importante ou un choix de conflit.
+
+## Charges et temps de repos
+
+- Ouvre **Ajuster** pour renseigner la charge réellement utilisée sur chaque série.
+- Le poids cible, le nombre de répétitions, l’effort et le repos sont rappelés sous la série.
+- Le bouton avec la flèche vers le bas applique la charge aux séries suivantes.
+- Valider une série démarre automatiquement le repos prévu et affiche la prochaine série dans le dock.
+- Le bouton **Durée** propose 1:00, 1:30, 2:00, 2:30, 3:00 ou 4:00 et peut mémoriser ce choix pour l’exercice.
+
